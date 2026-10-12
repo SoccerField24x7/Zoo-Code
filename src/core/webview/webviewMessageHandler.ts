@@ -1955,11 +1955,12 @@ export const webviewMessageHandler = async (
 				if (ALLOWED_VSCODE_SETTINGS.has(setting)) {
 					const config = vscode.workspace.getConfiguration()
 					const inspected = config.inspect(setting)
-					// Prefer the winning workspace scope so enabling is not no-oped by workspace `false`.
+					// Only touch workspace/folder when that scope already defines the key — otherwise
+					// write Global so enabling remote control does not create .vscode/settings.json.
 					const target =
 						inspected?.workspaceFolderValue !== undefined
 							? vscode.ConfigurationTarget.WorkspaceFolder
-							: inspected?.workspaceValue !== undefined || vscode.workspace.workspaceFolders?.length
+							: inspected?.workspaceValue !== undefined
 								? vscode.ConfigurationTarget.Workspace
 								: vscode.ConfigurationTarget.Global
 					await config.update(setting, value, target)

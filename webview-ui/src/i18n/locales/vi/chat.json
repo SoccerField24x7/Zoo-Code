@@ -24,7 +24,7 @@
 		"steerRemotelyHint": "Enables remote control for this workspace and opens the dashboard so you can approve, reply, and continue from there.",
 		"steerRemotelyNeedsGateway": "Switch this profile to Zoo Gateway before you can steer the task remotely.",
 		"steerRemotelyOpenSettings": "Open settings",
-		"steerRemotelyActive": "Remote steer is on — control this task from the Zoo dashboard.",
+		"steerRemotelyActive": "Remote steer is on, control this task from the Zoo dashboard.",
 		"steerRemotelyUnavailable": "Remote steer is enabled, but the Zoo dashboard endpoint is unreachable. Retry shortly or check your connection.",
 		"openRemoteDashboard": "Open dashboard"
 	},
