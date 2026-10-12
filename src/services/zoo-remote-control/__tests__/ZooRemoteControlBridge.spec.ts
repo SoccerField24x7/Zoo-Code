@@ -1,4 +1,4 @@
-﻿import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { EventEmitter } from "events"
 
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
