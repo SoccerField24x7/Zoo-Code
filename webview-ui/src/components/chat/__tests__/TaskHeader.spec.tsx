@@ -388,7 +388,7 @@ describe("TaskHeader", () => {
 			expect(mockPostMessage).toHaveBeenCalledWith({
 				type: "updateVSCodeSetting",
 				setting: "zoo-code.remoteControl.enabled",
-				value: true,
+				bool: true,
 			})
 		})
 

@@ -1948,7 +1948,8 @@ export const webviewMessageHandler = async (
 			break
 
 		case "updateVSCodeSetting": {
-			const { setting, value } = message
+			const { setting } = message
+			const value = message.bool ?? message.value
 
 			if (setting !== undefined && value !== undefined) {
 				if (ALLOWED_VSCODE_SETTINGS.has(setting)) {
