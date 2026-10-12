@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { providerIdentifiers } from "@roo-code/types"
 
-import { ZooRemoteControlClient } from "../ZooRemoteControlClient"
+import { ZooRemoteControlClient } from "../ZooRemoteControlClient.js"
 
 describe("ZooRemoteControlClient", () => {
 	let fetchFn: ReturnType<typeof vi.fn>

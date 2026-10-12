@@ -7,7 +7,7 @@ import {
 	REMOTE_MESSAGE_IMAGE_MAX_COUNT,
 	REMOTE_MESSAGE_TEXT_MAX_CHARS,
 	REMOTE_SNAPSHOT_MAX_MESSAGES,
-} from "../projectMessage"
+} from "../projectMessage.js"
 
 describe("projectClineMessageForRemote", () => {
 	it("truncates oversized tool diff payloads while keeping path metadata", () => {

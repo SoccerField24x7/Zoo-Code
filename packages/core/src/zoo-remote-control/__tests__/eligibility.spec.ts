@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import { providerIdentifiers } from "@roo-code/types"
 
-import { isZooRemoteControlEligible } from "../eligibility"
+import { isZooRemoteControlEligible } from "../eligibility.js"
 
 describe("isZooRemoteControlEligible", () => {
 	it("returns true when opted in with an eligible Zoo session", () => {
