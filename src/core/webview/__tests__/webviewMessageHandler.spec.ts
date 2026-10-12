@@ -194,6 +194,11 @@ vi.mock("vscode", () => {
 		env: {
 			isTelemetryEnabled: true,
 		},
+		ConfigurationTarget: {
+			Global: 1,
+			Workspace: 2,
+			WorkspaceFolder: 3,
+		},
 	}
 })
 
@@ -2305,5 +2310,45 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		await Promise.resolve()
 
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - updateVSCodeSetting remoteControl", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("writes zoo-code.remoteControl.enabled to Global when no workspace override exists", async () => {
+		const update = vi.fn().mockResolvedValue(undefined)
+		const inspect = vi.fn().mockReturnValue({})
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ update, inspect } as never)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateVSCodeSetting",
+			setting: "zoo-code.remoteControl.enabled",
+			bool: true,
+		})
+
+		expect(update).toHaveBeenCalledWith("zoo-code.remoteControl.enabled", true, vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("updates an existing workspace override instead of Global", async () => {
+		const update = vi.fn().mockResolvedValue(undefined)
+		const inspect = vi.fn().mockReturnValue({ workspaceValue: false })
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ update, inspect } as never)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateVSCodeSetting",
+			setting: "zoo-code.remoteControl.enabled",
+			bool: true,
+		})
+
+		expect(update).toHaveBeenCalledWith(
+			"zoo-code.remoteControl.enabled",
+			true,
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
 	})
 })

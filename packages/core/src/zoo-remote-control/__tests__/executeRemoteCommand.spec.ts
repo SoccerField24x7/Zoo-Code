@@ -206,4 +206,116 @@ describe("executeRemoteCommand", () => {
 			message: "boom",
 		})
 	})
+
+	it("approves a pending ask and acks", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const approveAsk = vi.fn()
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "approve_ask", payload: { text: "ok" } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({
+				getCurrentTask: () => ({
+					taskId: "t1",
+					hasPendingAsk: () => true,
+					approveAsk,
+					denyAsk: vi.fn(),
+				}),
+			}),
+		})
+
+		expect(approveAsk).toHaveBeenCalledWith({ text: "ok", images: undefined })
+		expect(ackCommand).toHaveBeenCalledWith({ commandId: "c1", status: "acked" })
+	})
+
+	it("denies a pending ask and acks", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const denyAsk = vi.fn()
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "deny_ask", payload: { text: "no" } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({
+				getCurrentTask: () => ({
+					taskId: "t1",
+					hasPendingAsk: () => true,
+					approveAsk: vi.fn(),
+					denyAsk,
+				}),
+			}),
+		})
+
+		expect(denyAsk).toHaveBeenCalledWith({ text: "no", images: undefined })
+		expect(ackCommand).toHaveBeenCalledWith({ commandId: "c1", status: "acked" })
+	})
+
+	it("cancels the current task when taskId matches", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const cancelCurrentTask = vi.fn().mockResolvedValue(undefined)
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "cancel_task", taskId: "t1" },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({
+				getCurrentTask: () => ({
+					taskId: "t1",
+					hasPendingAsk: () => false,
+					approveAsk: vi.fn(),
+					denyAsk: vi.fn(),
+				}),
+				cancelCurrentTask,
+			}),
+		})
+
+		expect(cancelCurrentTask).toHaveBeenCalledOnce()
+		expect(ackCommand).toHaveBeenCalledWith({ commandId: "c1", status: "acked" })
+	})
+
+	it("resumes a task by id", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const resumeTask = vi.fn().mockResolvedValue(undefined)
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "resume_task", taskId: "t9" },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({ resumeTask }),
+		})
+
+		expect(resumeTask).toHaveBeenCalledWith("t9")
+		expect(ackCommand).toHaveBeenCalledWith({ commandId: "c1", status: "acked" })
+	})
+
+	it("starts a new task", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const startNewTask = vi.fn().mockResolvedValue(undefined)
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "start_task", payload: { text: "go" } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({ startNewTask }),
+		})
+
+		expect(startNewTask).toHaveBeenCalledWith({ text: "go", images: undefined })
+		expect(ackCommand).toHaveBeenCalledWith({ commandId: "c1", status: "acked" })
+	})
+
+	it("switches mode", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const handleModeSwitch = vi.fn().mockResolvedValue(undefined)
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "switch_mode", payload: { mode: "architect" } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({ handleModeSwitch }),
+		})
+
+		expect(handleModeSwitch).toHaveBeenCalledWith("architect")
+		expect(ackCommand).toHaveBeenCalledWith({ commandId: "c1", status: "acked" })
+	})
 })
