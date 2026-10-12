@@ -3,8 +3,9 @@ import { EventEmitter } from "events"
 
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 
+import type { ZooRemoteControlClient } from "@roo-code/core"
+
 import { ZooRemoteControlBridge } from "../ZooRemoteControlBridge"
-import type { ZooRemoteControlClient } from "../ZooRemoteControlClient"
 
 vi.mock("vscode", () => ({
 	workspace: {

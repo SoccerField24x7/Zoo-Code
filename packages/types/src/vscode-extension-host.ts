@@ -665,7 +665,7 @@ export interface WebviewMessage {
 	apiConfiguration?: ProviderSettings
 	images?: string[]
 	bool?: boolean
-	value?: number
+	value?: number | boolean | string
 	stepIndex?: number
 	isLaunchAction?: boolean
 	forceShow?: boolean

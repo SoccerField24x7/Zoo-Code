@@ -1,6 +1,14 @@
 import * as vscode from "vscode"
 
 import {
+	isZooRemoteControlEligible,
+	projectClineMessageForRemote,
+	projectClineMessagesForSnapshot,
+	ZooRemoteControlClient,
+	type ZooRemoteCommand,
+	type ZooRemoteEvent,
+} from "@roo-code/core"
+import {
 	providerIdentifiers,
 	RooCodeEventName,
 	type ClineMessage,
@@ -12,10 +20,6 @@ import type { ClineProvider } from "../../core/webview/ClineProvider"
 import type { Mode } from "../../shared/modes"
 import { Package } from "../../shared/package"
 import { getCachedZooCodeToken, getZooCodeBaseUrl } from "../zoo-code-auth"
-import { isZooRemoteControlEligible } from "./eligibility"
-import { projectClineMessageForRemote, projectClineMessagesForSnapshot } from "./projectMessage"
-import { ZooRemoteControlClient } from "./ZooRemoteControlClient"
-import type { ZooRemoteCommand, ZooRemoteEvent } from "./types"
 
 const PRESENCE_INTERVAL_MS = 15_000
 const COMMAND_POLL_INTERVAL_MS = 2_000

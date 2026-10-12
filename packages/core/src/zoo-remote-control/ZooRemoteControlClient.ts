@@ -5,7 +5,7 @@ import {
 	type ZooRemoteEvent,
 	type ZooRemotePresence,
 	type ZooRemoteSnapshot,
-} from "./types"
+} from "./types.js"
 
 export type ZooRemoteControlClientOptions = {
 	getBaseUrl: () => string
