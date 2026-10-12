@@ -156,7 +156,7 @@ describe("ZooRemoteControlBridge", () => {
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
 		})
-		;(vscode.workspace as { workspaceFolders: { uri: { fsPath: string } }[] }).workspaceFolders = [
+		;(vscode.workspace as unknown as { workspaceFolders: { uri: { fsPath: string } }[] }).workspaceFolders = [
 			{ uri: { fsPath: "C:\\Users\\alice\\Desktop\\secret-client" } },
 		]
 
@@ -171,7 +171,7 @@ describe("ZooRemoteControlBridge", () => {
 		const presence = client.postPresence.mock.calls[0]?.[0] as { workspacePath?: string }
 		expect(presence.workspacePath).not.toMatch(/[/\\]|Users|alice/i)
 		bridge.dispose()
-		;(vscode.workspace as { workspaceFolders: { uri: { fsPath: string } }[] }).workspaceFolders = [
+		;(vscode.workspace as unknown as { workspaceFolders: { uri: { fsPath: string } }[] }).workspaceFolders = [
 			{ uri: { fsPath: "/tmp/project" } },
 		]
 	})
