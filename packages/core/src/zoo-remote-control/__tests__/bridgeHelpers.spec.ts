@@ -41,8 +41,12 @@ describe("bridgeHelpers", () => {
 
 	it("classifies remote HTTP statuses", () => {
 		expect(isRemoteAuthBlockedStatus(401)).toBe(true)
+		expect(isRemoteAuthBlockedStatus(402)).toBe(true)
+		expect(isRemoteAuthBlockedStatus(403)).toBe(true)
 		expect(isRemoteAuthBlockedStatus(404)).toBe(false)
+		expect(isRemoteAuthBlockedStatus(undefined)).toBe(false)
 		expect(isRemoteNotFoundStatus(404)).toBe(true)
 		expect(isRemoteNotFoundStatus(500)).toBe(false)
+		expect(isRemoteNotFoundStatus(undefined)).toBe(false)
 	})
 })

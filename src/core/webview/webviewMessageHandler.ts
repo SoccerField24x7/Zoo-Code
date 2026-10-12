@@ -1976,14 +1976,21 @@ export const webviewMessageHandler = async (
 			stopTts()
 			break
 
-		case "startRemoteControlSession": {
-			const { getZooRemoteControlBridge } = await import("../../extension")
-			await getZooRemoteControlBridge()?.setSessionActive(true)
-			break
-		}
+		case "startRemoteControlSession":
 		case "endRemoteControlSession": {
-			const { getZooRemoteControlBridge } = await import("../../extension")
-			await getZooRemoteControlBridge()?.setSessionActive(false)
+			try {
+				const { getZooRemoteControlBridge } = await import("../../extension")
+				const bridge = getZooRemoteControlBridge()
+				if (!bridge) {
+					provider.log("[ZooRemoteControl] session toggle ignored: bridge unavailable")
+					break
+				}
+				await bridge.setSessionActive(message.type === "startRemoteControlSession")
+			} catch (error) {
+				provider.log(
+					`[ZooRemoteControl] session toggle failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
 			break
 		}
 		case "updateVSCodeSetting": {

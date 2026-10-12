@@ -77,6 +77,8 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	/** Bumped on deactivate/dispose so in-flight polls/flushes become no-ops. */
 	private lifecycleEpoch = 0
 	private commandPollInFlight = false
+	/** At-most-once delivery for remote commands (esp. start_task) within an active session. */
+	private handledCommandIds = new Set<string>()
 
 	private presenceTimer: ReturnType<typeof setInterval> | undefined
 	private commandTimer: ReturnType<typeof setInterval> | undefined
@@ -362,6 +364,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		this.bindApiListeners(false)
 		this.pendingEvents = []
 		this.pendingPartials.clear()
+		this.handledCommandIds.clear()
 		this.publishAvailabilityToWebview()
 
 		if (notifyOffline) {
@@ -559,12 +562,16 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			mode = undefined
 		}
 
+		const epoch = this.lifecycleEpoch
 		const result = await this.client.postSnapshot({
 			instanceId: this.instanceId,
 			taskId: task.taskId,
 			messages: projectClineMessagesForSnapshot(task.clineMessages),
 			mode,
 		})
+		if (!this.isLifecycleCurrent(epoch)) {
+			return
+		}
 
 		if (isRemoteAuthBlockedStatus(result.status)) {
 			this.markBackoff(NOT_ELIGIBLE_BACKOFF_MS)
@@ -667,6 +674,13 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async executeCommand(command: ZooRemoteCommand, epoch: number): Promise<void> {
+		if (this.handledCommandIds.has(command.commandId)) {
+			if (this.isLifecycleCurrent(epoch)) {
+				await this.client.ackCommand({ commandId: command.commandId, status: "acked" })
+			}
+			return
+		}
+
 		await executeRemoteCommand({
 			command,
 			epoch,
@@ -696,5 +710,6 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				endRemoteSession: () => this.setSessionActive(false),
 			},
 		})
+		this.handledCommandIds.add(command.commandId)
 	}
 }

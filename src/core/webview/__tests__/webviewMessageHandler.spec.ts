@@ -67,6 +67,17 @@ vi.mock("../rulesMessageHandler", () => ({
 	handleOpenRulesDirectory: vi.fn(),
 }))
 
+const mockSetSessionActive = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const mockGetZooRemoteControlBridge = vi.hoisted(() =>
+	vi.fn((): { setSessionActive: typeof mockSetSessionActive } | undefined => ({
+		setSessionActive: mockSetSessionActive,
+	})),
+)
+
+vi.mock("../../../extension", () => ({
+	getZooRemoteControlBridge: () => mockGetZooRemoteControlBridge(),
+}))
+
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
 		hasInstance: vi.fn().mockReturnValue(false),
@@ -2371,5 +2382,79 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		await Promise.resolve()
 
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - remote control session", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockSetSessionActive.mockResolvedValue(undefined)
+		mockGetZooRemoteControlBridge.mockImplementation(() => ({ setSessionActive: mockSetSessionActive }))
+	})
+
+	it("starts and ends a remote session through the bridge", async () => {
+		await webviewMessageHandler(mockClineProvider, { type: "startRemoteControlSession" })
+		await webviewMessageHandler(mockClineProvider, { type: "endRemoteControlSession" })
+
+		expect(mockSetSessionActive).toHaveBeenNthCalledWith(1, true)
+		expect(mockSetSessionActive).toHaveBeenNthCalledWith(2, false)
+	})
+
+	it("logs and completes when the bridge is unavailable", async () => {
+		mockGetZooRemoteControlBridge.mockReturnValue(undefined)
+
+		await expect(
+			webviewMessageHandler(mockClineProvider, { type: "startRemoteControlSession" }),
+		).resolves.not.toThrow()
+		expect(mockSetSessionActive).not.toHaveBeenCalled()
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("bridge unavailable"))
+	})
+
+	it("selects the narrowest ConfigurationTarget for updateVSCodeSetting", async () => {
+		const update = vi.fn().mockResolvedValue(undefined)
+		const inspect = vi
+			.fn()
+			.mockReturnValueOnce({ workspaceFolderValue: true })
+			.mockReturnValueOnce({ workspaceValue: false })
+			.mockReturnValueOnce({ globalValue: undefined })
+
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			inspect,
+			update,
+			get: vi.fn(),
+		} as never)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateVSCodeSetting",
+			setting: "terminal.integrated.inheritEnv",
+			bool: true,
+		})
+		expect(update).toHaveBeenLastCalledWith(
+			"terminal.integrated.inheritEnv",
+			true,
+			vscode.ConfigurationTarget.WorkspaceFolder,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateVSCodeSetting",
+			setting: "terminal.integrated.inheritEnv",
+			bool: false,
+		})
+		expect(update).toHaveBeenLastCalledWith(
+			"terminal.integrated.inheritEnv",
+			false,
+			vscode.ConfigurationTarget.Workspace,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateVSCodeSetting",
+			setting: "terminal.integrated.inheritEnv",
+			bool: true,
+		})
+		expect(update).toHaveBeenLastCalledWith(
+			"terminal.integrated.inheritEnv",
+			true,
+			vscode.ConfigurationTarget.Global,
+		)
 	})
 })

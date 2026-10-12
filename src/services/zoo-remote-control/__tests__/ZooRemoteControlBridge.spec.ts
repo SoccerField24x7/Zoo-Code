@@ -443,6 +443,33 @@ describe("ZooRemoteControlBridge", () => {
 		bridge.dispose()
 	})
 
+	it("acks duplicate start_task commandIds without starting another task", async () => {
+		client.getCommands
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				body: {
+					commands: [{ commandId: "dup-start", type: "start_task", payload: { text: "first" } }],
+				},
+			})
+			.mockResolvedValueOnce({
+				ok: true,
+				status: 200,
+				body: {
+					commands: [{ commandId: "dup-start", type: "start_task", payload: { text: "again" } }],
+				},
+			})
+
+		const bridge = await activateEligibleBridge()
+		await vi.advanceTimersByTimeAsync(2_000)
+		await vi.advanceTimersByTimeAsync(2_000)
+
+		expect(api.startNewTask).toHaveBeenCalledTimes(1)
+		expect(api.startNewTask).toHaveBeenCalledWith({ text: "first", images: undefined })
+		expect(client.ackCommand).toHaveBeenCalledWith({ commandId: "dup-start", status: "acked" })
+		bridge.dispose()
+	})
+
 	it("acks execution_failed when a command throws", async () => {
 		api.sendMessage.mockRejectedValueOnce(new Error("boom"))
 		client.getCommands.mockResolvedValueOnce({
@@ -870,6 +897,10 @@ describe("ZooRemoteControlBridge", () => {
 		const bridge = await activateEligibleBridge()
 		await vi.advanceTimersByTimeAsync(0)
 		expect(client.postSnapshot).toHaveBeenCalled()
+		// Snapshot 404 shares the 60s unavailable backoff — presence must not fire again yet.
+		client.postPresence.mockClear()
+		await vi.advanceTimersByTimeAsync(15_000)
+		expect(client.postPresence).not.toHaveBeenCalled()
 		bridge.dispose()
 	})
 
