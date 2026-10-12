@@ -1,4 +1,4 @@
-import { memo, useRef, useState, useMemo } from "react"
+import { memo, useEffect, useRef, useState, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import {
 	ChevronUp,
@@ -11,9 +11,10 @@ import {
 } from "lucide-react"
 import prettyBytes from "pretty-bytes"
 
-import type { ClineMessage } from "@roo-code/types"
+import { providerIdentifiers, type ClineMessage } from "@roo-code/types"
 
 import { getModelMaxOutputTokens } from "@roo/api"
+import { findLastIndex } from "@roo/array"
 
 import { formatLargeNumber } from "@src/utils/format"
 import { cn } from "@src/lib/utils"
@@ -21,6 +22,7 @@ import { StandardTooltip, Button, Table, TableBody, TableRow, TableCell, Circula
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
 import { vscode } from "@src/utils/vscode"
+import DismissibleUpsell from "@src/components/common/DismissibleUpsell"
 
 import Thumbnails from "../common/Thumbnails"
 import { TaskActions } from "./TaskActions"
@@ -63,13 +65,59 @@ const TaskHeader = ({
 	todos,
 }: TaskHeaderProps) => {
 	const { t } = useTranslation()
-	const { apiConfiguration, currentTaskItem } = useExtensionState()
+	const {
+		apiConfiguration,
+		currentTaskItem,
+		clineMessages,
+		zooCodeIsAuthenticated,
+		zooCodeBaseUrl,
+		remoteControlEnabled,
+	} = useExtensionState()
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
+	const [showRemoteSteerOffer, setShowRemoteSteerOffer] = useState(false)
 
 	const textContainerRef = useRef<HTMLDivElement>(null)
 	const textRef = useRef<HTMLDivElement>(null)
 	const contextWindow = model?.contextWindow || 1
+
+	const isZooGateway = apiConfiguration?.apiProvider === providerIdentifiers.zooGateway
+	const canOfferRemoteSteer = Boolean(zooCodeIsAuthenticated && isZooGateway && currentTaskItem)
+
+	const isTaskComplete =
+		clineMessages && clineMessages.length > 0
+			? (() => {
+					const lastRelevantIndex = findLastIndex(
+						clineMessages,
+						(msg) => !(msg.ask === "resume_task" || msg.ask === "resume_completed_task"),
+					)
+					const last = lastRelevantIndex >= 0 ? clineMessages[lastRelevantIndex] : undefined
+					return last?.ask === "completion_result" || last?.say === "completion_result"
+				})()
+			: false
+
+	useEffect(() => {
+		if (!canOfferRemoteSteer || remoteControlEnabled || isTaskComplete) {
+			setShowRemoteSteerOffer(false)
+			return
+		}
+		// Match Roo's long-running-task cadence: offer after the task has been going a bit.
+		const timer = setTimeout(() => setShowRemoteSteerOffer(true), 120_000)
+		return () => clearTimeout(timer)
+	}, [canOfferRemoteSteer, remoteControlEnabled, isTaskComplete, currentTaskItem?.id])
+
+	const enableRemoteSteer = () => {
+		vscode.postMessage({
+			type: "updateVSCodeSetting",
+			setting: "zoo-code.remoteControl.enabled",
+			value: true,
+		})
+	}
+
+	const openRemoteDashboard = () => {
+		const base = (zooCodeBaseUrl || "https://www.zoocode.dev").replace(/\/$/, "")
+		vscode.postMessage({ type: "openExternal", url: `${base}/dashboard/agents/ide` })
+	}
 
 	// Calculate maxTokens (reserved for output) once for reuse in percentage and tooltip
 	const maxTokens = useMemo(
@@ -140,6 +188,30 @@ const TaskHeader = ({
 						{t("chat:task.waitingOnSubtask")}
 						<ArrowRight className="size-3" />
 					</Button>
+				</div>
+			)}
+			{canOfferRemoteSteer && remoteControlEnabled && !isTaskComplete && (
+				<div
+					className="mb-2 flex items-center justify-between gap-2 rounded border border-vscode-dropdown-border bg-vscode-badge-background/80 p-2 text-sm text-vscode-badge-foreground"
+					onClick={(e) => e.stopPropagation()}>
+					<span>{t("chat:task.steerRemotelyActive")}</span>
+					<button
+						type="button"
+						className="shrink-0 rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
+						onClick={openRemoteDashboard}>
+						{t("chat:task.openRemoteDashboard")}
+					</button>
+				</div>
+			)}
+			{showRemoteSteerOffer && !isTaskComplete && (
+				<div className="mb-2" onClick={(e) => e.stopPropagation()}>
+					<DismissibleUpsell
+						upsellId="zooRemoteSteer"
+						onClick={enableRemoteSteer}
+						dismissOnClick={false}
+						variant="banner">
+						{t("chat:task.steerRemotely")}
+					</DismissibleUpsell>
 				</div>
 			)}
 			<div

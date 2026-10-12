@@ -19,7 +19,10 @@
 		"openUiHistory": "Open UI History",
 		"backToParentTask": "Parent task",
 		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"goToSubtask": "Go to subtask",
+		"steerRemotely": "Need to step away? Steer this task remotely from the Zoo dashboard.",
+		"steerRemotelyActive": "Remote steer is on — control this task from the Zoo dashboard.",
+		"openRemoteDashboard": "Open dashboard"
 	},
 	"unpin": "Unpin",
 	"pin": "Pin",

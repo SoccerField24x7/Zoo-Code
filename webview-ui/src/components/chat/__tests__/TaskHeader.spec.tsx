@@ -35,12 +35,31 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeBadge: ({ children }: { children: React.ReactNode }) => <div data-testid="vscode-badge">{children}</div>,
 }))
 
+vi.mock("@src/components/common/DismissibleUpsell", () => ({
+	default: ({
+		children,
+		onClick,
+		upsellId,
+	}: {
+		children: React.ReactNode
+		onClick?: () => void
+		upsellId: string
+	}) => (
+		<button type="button" data-testid={`upsell-${upsellId}`} onClick={onClick}>
+			{children}
+		</button>
+	),
+}))
+
 // Create a variable to hold the mock state
 const mockExtensionState: {
 	apiConfiguration: ProviderSettings
 	currentTaskItem: { id: string } | null
 	clineMessages: any[]
 	taskHistory: any[]
+	zooCodeIsAuthenticated?: boolean
+	zooCodeBaseUrl?: string
+	remoteControlEnabled?: boolean
 } = {
 	apiConfiguration: {
 		apiProvider: providerIdentifiers.anthropic,
@@ -50,6 +69,8 @@ const mockExtensionState: {
 	currentTaskItem: { id: "test-task-id" },
 	clineMessages: [],
 	taskHistory: [],
+	zooCodeIsAuthenticated: false,
+	remoteControlEnabled: false,
 }
 
 // Mock the ExtensionStateContext
@@ -328,6 +349,60 @@ describe("TaskHeader", () => {
 			renderTaskHeader({ contextTokens: 250 })
 
 			expect(screen.getByText("25%")).toBeInTheDocument()
+		})
+	})
+
+	describe("remote steer banner", () => {
+		beforeEach(() => {
+			vi.useFakeTimers()
+			mockPostMessage.mockClear()
+			mockExtensionState.apiConfiguration = {
+				apiProvider: providerIdentifiers.zooGateway,
+			} as ProviderSettings
+			mockExtensionState.zooCodeIsAuthenticated = true
+			mockExtensionState.remoteControlEnabled = false
+			mockExtensionState.clineMessages = [{ type: "say", say: "text", ts: 1, text: "working" }]
+		})
+
+		afterEach(() => {
+			vi.useRealTimers()
+			mockExtensionState.apiConfiguration = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "test-api-key",
+				apiModelId: "claude-3-opus-20240229",
+			} as ProviderSettings
+			mockExtensionState.zooCodeIsAuthenticated = false
+			mockExtensionState.remoteControlEnabled = false
+			mockExtensionState.clineMessages = []
+		})
+
+		it("offers remote steer after two minutes and enables it on click", async () => {
+			renderTaskHeader()
+			expect(screen.queryByTestId("upsell-zooRemoteSteer")).not.toBeInTheDocument()
+
+			await vi.advanceTimersByTimeAsync(120_000)
+			const offer = screen.getByTestId("upsell-zooRemoteSteer")
+			expect(offer).toHaveTextContent("chat:task.steerRemotely")
+
+			fireEvent.click(offer)
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "updateVSCodeSetting",
+				setting: "zoo-code.remoteControl.enabled",
+				value: true,
+			})
+		})
+
+		it("shows the active remote steer strip with a dashboard link", () => {
+			mockExtensionState.remoteControlEnabled = true
+			mockExtensionState.zooCodeBaseUrl = "https://www.zoocode.dev"
+			renderTaskHeader()
+
+			expect(screen.getByText("chat:task.steerRemotelyActive")).toBeInTheDocument()
+			fireEvent.click(screen.getByText("chat:task.openRemoteDashboard"))
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "openExternal",
+				url: "https://www.zoocode.dev/dashboard/agents/ide",
+			})
 		})
 	})
 })

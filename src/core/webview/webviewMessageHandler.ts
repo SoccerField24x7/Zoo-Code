@@ -93,7 +93,7 @@ import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
 
-const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
+const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv", "zoo-code.remoteControl.enabled"])
 
 // Serializes handling of "telemetrySetting" messages. Each invocation reads the previous
 // setting, awaits a persistence write, then applies the new live telemetry state -- with no
@@ -1953,6 +1953,9 @@ export const webviewMessageHandler = async (
 			if (setting !== undefined && value !== undefined) {
 				if (ALLOWED_VSCODE_SETTINGS.has(setting)) {
 					await vscode.workspace.getConfiguration().update(setting, value, true)
+					if (setting === "zoo-code.remoteControl.enabled") {
+						await provider.postStateToWebview()
+					}
 				} else {
 					vscode.window.showErrorMessage(`Cannot update restricted VSCode setting: ${setting}`)
 				}

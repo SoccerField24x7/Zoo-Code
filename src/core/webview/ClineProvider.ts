@@ -2906,6 +2906,9 @@ export class ClineProvider
 				}
 			})(),
 			...zooCodeState,
+			remoteControlEnabled: vscode.workspace
+				.getConfiguration(Package.name)
+				.get<boolean>("remoteControl.enabled", false),
 			platform: process.platform,
 			arch: process.arch,
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),

@@ -420,6 +420,8 @@ export type ExtensionState = Pick<
 	zooCodeUserEmail?: string
 	zooCodeUserImage?: string
 	zooCodeBaseUrl?: string
+	/** VS Code setting zoo-code.remoteControl.enabled — dashboard remote steer opt-in. */
+	remoteControlEnabled?: boolean
 	deviceName?: string
 	debug?: boolean
 
