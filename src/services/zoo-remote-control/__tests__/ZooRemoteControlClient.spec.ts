@@ -6,9 +6,9 @@ import { ZooRemoteControlClient } from "../ZooRemoteControlClient"
 
 describe("ZooRemoteControlClient", () => {
 	let fetchFn: ReturnType<typeof vi.fn>
-	let getSessionToken: ReturnType<typeof vi.fn>
-	let getBaseUrl: ReturnType<typeof vi.fn>
-	let log: ReturnType<typeof vi.fn>
+	let getSessionToken: ReturnType<typeof vi.fn<() => string>>
+	let getBaseUrl: ReturnType<typeof vi.fn<() => string>>
+	let log: ReturnType<typeof vi.fn<(message: string) => void>>
 	let client: ZooRemoteControlClient
 
 	beforeEach(() => {
