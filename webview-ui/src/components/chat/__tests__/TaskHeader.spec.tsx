@@ -352,20 +352,18 @@ describe("TaskHeader", () => {
 		})
 	})
 
-	describe("remote steer banner", () => {
+	describe("remote steer control", () => {
 		beforeEach(() => {
-			vi.useFakeTimers()
 			mockPostMessage.mockClear()
 			mockExtensionState.apiConfiguration = {
 				apiProvider: providerIdentifiers.zooGateway,
 			} as ProviderSettings
 			mockExtensionState.zooCodeIsAuthenticated = true
 			mockExtensionState.remoteControlEnabled = false
-			mockExtensionState.clineMessages = [{ type: "say", say: "text", ts: 1, text: "working" }]
+			mockExtensionState.clineMessages = [{ type: "say", say: "completion_result", ts: 1, text: "done" }]
 		})
 
 		afterEach(() => {
-			vi.useRealTimers()
 			mockExtensionState.apiConfiguration = {
 				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "test-api-key",
@@ -376,15 +374,11 @@ describe("TaskHeader", () => {
 			mockExtensionState.clineMessages = []
 		})
 
-		it("offers remote steer after two minutes and enables it on click", async () => {
+		it("shows an immediate manual control to enable remote steer, including on completed tasks", () => {
 			renderTaskHeader()
-			expect(screen.queryByTestId("upsell-zooRemoteSteer")).not.toBeInTheDocument()
-
-			await vi.advanceTimersByTimeAsync(120_000)
-			const offer = screen.getByTestId("upsell-zooRemoteSteer")
-			expect(offer).toHaveTextContent("chat:task.steerRemotely")
-
-			fireEvent.click(offer)
+			const offer = screen.getByTestId("remote-steer-offer")
+			expect(offer).toHaveTextContent("chat:task.steerRemotelyHint")
+			fireEvent.click(screen.getByRole("button", { name: "chat:task.steerRemotely" }))
 			expect(mockPostMessage).toHaveBeenCalledWith({
 				type: "updateVSCodeSetting",
 				setting: "zoo-code.remoteControl.enabled",
@@ -397,7 +391,7 @@ describe("TaskHeader", () => {
 			mockExtensionState.zooCodeBaseUrl = "https://www.zoocode.dev"
 			renderTaskHeader()
 
-			expect(screen.getByText("chat:task.steerRemotelyActive")).toBeInTheDocument()
+			expect(screen.getByTestId("remote-steer-active")).toHaveTextContent("chat:task.steerRemotelyActive")
 			fireEvent.click(screen.getByText("chat:task.openRemoteDashboard"))
 			expect(mockPostMessage).toHaveBeenCalledWith({
 				type: "openExternal",

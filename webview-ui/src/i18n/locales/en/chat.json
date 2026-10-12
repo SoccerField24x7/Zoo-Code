@@ -20,7 +20,8 @@
 		"backToParentTask": "Parent task",
 		"waitingOnSubtask": "Waiting on subtask",
 		"goToSubtask": "Go to subtask",
-		"steerRemotely": "Need to step away? Steer this task remotely from the Zoo dashboard.",
+		"steerRemotely": "Steer this task remotely",
+		"steerRemotelyHint": "Mirror this task to the Zoo dashboard so you can approve, reply, and continue from there.",
 		"steerRemotelyActive": "Remote steer is on — control this task from the Zoo dashboard.",
 		"openRemoteDashboard": "Open dashboard"
 	},

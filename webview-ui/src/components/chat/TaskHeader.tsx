@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, useMemo } from "react"
+import { memo, useRef, useState, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import {
 	ChevronUp,
@@ -14,7 +14,6 @@ import prettyBytes from "pretty-bytes"
 import { providerIdentifiers, type ClineMessage } from "@roo-code/types"
 
 import { getModelMaxOutputTokens } from "@roo/api"
-import { findLastIndex } from "@roo/array"
 
 import { formatLargeNumber } from "@src/utils/format"
 import { cn } from "@src/lib/utils"
@@ -22,7 +21,6 @@ import { StandardTooltip, Button, Table, TableBody, TableRow, TableCell, Circula
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
 import { vscode } from "@src/utils/vscode"
-import DismissibleUpsell from "@src/components/common/DismissibleUpsell"
 
 import Thumbnails from "../common/Thumbnails"
 import { TaskActions } from "./TaskActions"
@@ -65,17 +63,10 @@ const TaskHeader = ({
 	todos,
 }: TaskHeaderProps) => {
 	const { t } = useTranslation()
-	const {
-		apiConfiguration,
-		currentTaskItem,
-		clineMessages,
-		zooCodeIsAuthenticated,
-		zooCodeBaseUrl,
-		remoteControlEnabled,
-	} = useExtensionState()
+	const { apiConfiguration, currentTaskItem, zooCodeIsAuthenticated, zooCodeBaseUrl, remoteControlEnabled } =
+		useExtensionState()
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
-	const [showRemoteSteerOffer, setShowRemoteSteerOffer] = useState(false)
 
 	const textContainerRef = useRef<HTMLDivElement>(null)
 	const textRef = useRef<HTMLDivElement>(null)
@@ -83,28 +74,6 @@ const TaskHeader = ({
 
 	const isZooGateway = apiConfiguration?.apiProvider === providerIdentifiers.zooGateway
 	const canOfferRemoteSteer = Boolean(zooCodeIsAuthenticated && isZooGateway && currentTaskItem)
-
-	const isTaskComplete =
-		clineMessages && clineMessages.length > 0
-			? (() => {
-					const lastRelevantIndex = findLastIndex(
-						clineMessages,
-						(msg) => !(msg.ask === "resume_task" || msg.ask === "resume_completed_task"),
-					)
-					const last = lastRelevantIndex >= 0 ? clineMessages[lastRelevantIndex] : undefined
-					return last?.ask === "completion_result" || last?.say === "completion_result"
-				})()
-			: false
-
-	useEffect(() => {
-		if (!canOfferRemoteSteer || remoteControlEnabled || isTaskComplete) {
-			setShowRemoteSteerOffer(false)
-			return
-		}
-		// Match Roo's long-running-task cadence: offer after the task has been going a bit.
-		const timer = setTimeout(() => setShowRemoteSteerOffer(true), 120_000)
-		return () => clearTimeout(timer)
-	}, [canOfferRemoteSteer, remoteControlEnabled, isTaskComplete, currentTaskItem?.id])
 
 	const enableRemoteSteer = () => {
 		vscode.postMessage({
@@ -190,10 +159,11 @@ const TaskHeader = ({
 					</Button>
 				</div>
 			)}
-			{canOfferRemoteSteer && remoteControlEnabled && !isTaskComplete && (
+			{canOfferRemoteSteer && remoteControlEnabled && (
 				<div
 					className="mb-2 flex items-center justify-between gap-2 rounded border border-vscode-dropdown-border bg-vscode-badge-background/80 p-2 text-sm text-vscode-badge-foreground"
-					onClick={(e) => e.stopPropagation()}>
+					onClick={(e) => e.stopPropagation()}
+					data-testid="remote-steer-active">
 					<span>{t("chat:task.steerRemotelyActive")}</span>
 					<button
 						type="button"
@@ -203,15 +173,18 @@ const TaskHeader = ({
 					</button>
 				</div>
 			)}
-			{showRemoteSteerOffer && !isTaskComplete && (
-				<div className="mb-2" onClick={(e) => e.stopPropagation()}>
-					<DismissibleUpsell
-						upsellId="zooRemoteSteer"
-						onClick={enableRemoteSteer}
-						dismissOnClick={false}
-						variant="banner">
+			{canOfferRemoteSteer && !remoteControlEnabled && (
+				<div
+					className="mb-2 flex items-center justify-between gap-2 rounded border border-vscode-dropdown-border bg-vscode-editor-background p-2 text-sm"
+					onClick={(e) => e.stopPropagation()}
+					data-testid="remote-steer-offer">
+					<span className="text-vscode-descriptionForeground">{t("chat:task.steerRemotelyHint")}</span>
+					<button
+						type="button"
+						className="shrink-0 rounded bg-vscode-button-background px-2 py-1 text-xs font-medium text-vscode-button-foreground hover:bg-vscode-button-hoverBackground"
+						onClick={enableRemoteSteer}>
 						{t("chat:task.steerRemotely")}
-					</DismissibleUpsell>
+					</button>
 				</div>
 			)}
 			<div
