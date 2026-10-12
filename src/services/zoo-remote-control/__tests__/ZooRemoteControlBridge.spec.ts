@@ -488,4 +488,301 @@ describe("ZooRemoteControlBridge", () => {
 		expect(client.ackCommand).toHaveBeenCalledWith({ commandId: "m1", status: "acked" })
 		bridge.dispose()
 	})
+
+	it("answers follow-ups and can switch mode from the payload", async () => {
+		provider.handleModeSwitch = vi.fn().mockResolvedValue(undefined)
+		client.getCommands.mockResolvedValueOnce({
+			ok: true,
+			status: 200,
+			body: {
+				commands: [
+					{
+						commandId: "f1",
+						type: "answer_followup",
+						payload: { text: "option a", mode: "architect" },
+					},
+				],
+			},
+		})
+
+		const bridge = await activateEligibleBridge()
+		await vi.advanceTimersByTimeAsync(2_000)
+
+		expect(api.sendMessage).toHaveBeenCalledWith("option a", undefined)
+		expect(provider.handleModeSwitch).toHaveBeenCalledWith("architect")
+		expect(client.ackCommand).toHaveBeenCalledWith({ commandId: "f1", status: "acked" })
+		bridge.dispose()
+	})
+
+	it("fails switch_mode when mode is missing", async () => {
+		client.getCommands.mockResolvedValueOnce({
+			ok: true,
+			status: 200,
+			body: { commands: [{ commandId: "m1", type: "switch_mode", payload: {} }] },
+		})
+
+		const bridge = await activateEligibleBridge()
+		await vi.advanceTimersByTimeAsync(2_000)
+
+		expect(client.ackCommand).toHaveBeenCalledWith({
+			commandId: "m1",
+			status: "failed",
+			errorCode: "missing_mode",
+		})
+		bridge.dispose()
+	})
+
+	it("deactivates on auth/billing presence failures", async () => {
+		const bridge = await activateEligibleBridge()
+		client.postPresence.mockResolvedValueOnce({ ok: false, status: 401 })
+		await vi.advanceTimersByTimeAsync(15_000)
+		expect(bridge.isActive()).toBe(false)
+		bridge.dispose()
+	})
+
+	it("marks the bridge unavailable on command 404 and recovers after backoff", async () => {
+		const bridge = await activateEligibleBridge()
+		client.getCommands.mockResolvedValueOnce({ ok: false, status: 404 })
+		await vi.advanceTimersByTimeAsync(2_000)
+
+		client.getCommands.mockClear()
+		client.postPresence.mockClear()
+		await vi.advanceTimersByTimeAsync(15_000)
+		expect(client.postPresence).not.toHaveBeenCalled()
+
+		await vi.advanceTimersByTimeAsync(50_000)
+		client.postPresence.mockResolvedValue({ ok: true, status: 200 })
+		client.getCommands.mockResolvedValue({ ok: true, status: 200, body: { commands: [] } })
+		await vi.advanceTimersByTimeAsync(15_000)
+		expect(client.postPresence).toHaveBeenCalled()
+		bridge.dispose()
+	})
+
+	it("deactivates when command polling returns 403", async () => {
+		const bridge = await activateEligibleBridge()
+		client.getCommands.mockResolvedValueOnce({ ok: false, status: 403 })
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(bridge.isActive()).toBe(false)
+		bridge.dispose()
+	})
+
+	it("publishes a snapshot when the current task has messages", async () => {
+		provider.getCurrentTask.mockReturnValue({
+			taskId: "task-snap",
+			taskMode: "code",
+			clineMessages: [
+				{ ts: 1, type: "say", say: "text", text: "hello" },
+				{ ts: 2, type: "ask", ask: "tool", text: JSON.stringify({ path: "a.ts", diff: "x" }) },
+			],
+		})
+
+		const bridge = await activateEligibleBridge()
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(client.postSnapshot).toHaveBeenCalledWith(
+			expect.objectContaining({
+				instanceId: "instance-1",
+				taskId: "task-snap",
+				mode: "code",
+				messages: expect.arrayContaining([expect.objectContaining({ text: "hello" })]),
+			}),
+		)
+		bridge.dispose()
+	})
+
+	it("coalesces partial message events and flushes them", async () => {
+		const bridge = await activateEligibleBridge()
+		client.postEvents.mockClear()
+
+		api.emit(RooCodeEventName.Message, {
+			taskId: "task-1",
+			action: "updated",
+			message: { ts: 9, type: "say", say: "text", text: "par", partial: true, messageId: "m9" },
+		})
+		await vi.advanceTimersByTimeAsync(100)
+
+		expect(client.postEvents).toHaveBeenCalledWith(
+			"instance-1",
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "message",
+					action: "updated",
+					message: expect.objectContaining({ text: "par", partial: true }),
+				}),
+			]),
+		)
+		bridge.dispose()
+	})
+
+	it("throttles rapid partial flushes", async () => {
+		const bridge = await activateEligibleBridge()
+		client.postEvents.mockClear()
+
+		api.emit(RooCodeEventName.Message, {
+			taskId: "task-1",
+			message: { ts: 1, type: "say", say: "text", text: "a", partial: true, messageId: "p1" },
+		})
+		api.emit(RooCodeEventName.Message, {
+			taskId: "task-1",
+			message: { ts: 1, type: "say", say: "text", text: "ab", partial: true, messageId: "p1" },
+		})
+		await vi.advanceTimersByTimeAsync(50)
+		const earlyCalls = client.postEvents.mock.calls.length
+
+		await vi.advanceTimersByTimeAsync(100)
+		expect(client.postEvents.mock.calls.length).toBeGreaterThanOrEqual(earlyCalls)
+		bridge.dispose()
+	})
+
+	it("drops event batches on postEvents 404", async () => {
+		client.postEvents.mockResolvedValue({ ok: false, status: 404 })
+		const bridge = await activateEligibleBridge()
+		api.emit(RooCodeEventName.TaskIdle, "task-1")
+		await vi.advanceTimersByTimeAsync(100)
+
+		client.postEvents.mockClear()
+		client.postEvents.mockResolvedValue({ ok: true, status: 200 })
+		await vi.advanceTimersByTimeAsync(100)
+		// 404 path drops the batch rather than re-queueing it.
+		expect(client.postEvents).not.toHaveBeenCalled()
+		bridge.dispose()
+	})
+
+	it("re-queues event batches when postEvents returns 401", async () => {
+		client.postEvents.mockResolvedValue({ ok: false, status: 401 })
+		const bridge = await activateEligibleBridge()
+		api.emit(RooCodeEventName.TaskIdle, "task-1")
+		await vi.advanceTimersByTimeAsync(100)
+		expect(client.postEvents).toHaveBeenCalled()
+		bridge.dispose()
+	})
+
+	it("syncs when already active by republishing presence", async () => {
+		const bridge = await activateEligibleBridge()
+		client.postPresence.mockClear()
+		provider.emit(RooCodeEventName.ProviderProfileChanged, {
+			name: "Zoo Gateway",
+			provider: providerIdentifiers.zooGateway,
+		})
+		await vi.advanceTimersByTimeAsync(0)
+		expect(client.postPresence).toHaveBeenCalled()
+		expect(bridge.isActive()).toBe(true)
+		bridge.dispose()
+	})
+
+	it("reacts to configuration and secret changes", async () => {
+		let configListener: ((event: { affectsConfiguration: (key: string) => boolean }) => void) | undefined
+		let secretListener: ((event: { key: string }) => void) | undefined
+		vi.mocked(vscode.workspace.onDidChangeConfiguration).mockImplementation((listener) => {
+			configListener = listener as typeof configListener
+			return { dispose: vi.fn() }
+		})
+		context.secrets.onDidChange.mockImplementation((listener: (event: { key: string }) => void) => {
+			secretListener = listener
+			return { dispose: vi.fn() }
+		})
+
+		getConfigValue = () => false
+		const bridge = createBridge()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(bridge.isActive()).toBe(false)
+
+		getConfigValue = () => true
+		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
+		provider.contextProxy.getProviderSettings.mockReturnValue({
+			apiProvider: providerIdentifiers.zooGateway,
+		})
+		configListener?.({ affectsConfiguration: (key) => key === "zoo-code.remoteControl.enabled" })
+		await vi.advanceTimersByTimeAsync(0)
+		expect(bridge.isActive()).toBe(true)
+
+		vi.mocked(getCachedZooCodeToken).mockReturnValue("")
+		secretListener?.({ key: "zoo-code-session-token" })
+		await vi.advanceTimersByTimeAsync(0)
+		expect(bridge.isActive()).toBe(false)
+		bridge.dispose()
+	})
+
+	it("generates and persists an instance id when none is stored", async () => {
+		context.globalState.get.mockImplementation((key: string) => {
+			if (key === "zooRemoteControl.eventSeq") return -1
+			return undefined
+		})
+		getConfigValue = () => true
+		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
+		provider.contextProxy.getProviderSettings.mockReturnValue({
+			apiProvider: providerIdentifiers.zooGateway,
+		})
+
+		const bridge = createBridge()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(bridge.getInstanceId()).toBe("test-session-id")
+		expect(context.globalState.update).toHaveBeenCalledWith("zooRemoteControl.instanceId", "test-session-id")
+		bridge.dispose()
+	})
+
+	it("tolerates provider settings lookup failures", async () => {
+		getConfigValue = () => true
+		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
+		provider.contextProxy.getProviderSettings.mockImplementation(() => {
+			throw new Error("settings boom")
+		})
+		const bridge = createBridge()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(bridge.isActive()).toBe(false)
+		bridge.dispose()
+	})
+
+	it("skips snapshot publish when the current task has no messages", async () => {
+		provider.getCurrentTask.mockReturnValue({ taskId: "task-empty", clineMessages: undefined })
+		const bridge = await activateEligibleBridge()
+		expect(client.postSnapshot).not.toHaveBeenCalled()
+		bridge.dispose()
+	})
+
+	it("publishes snapshot 404 as unavailable without crashing", async () => {
+		provider.getCurrentTask.mockReturnValue({
+			taskId: "task-snap",
+			clineMessages: [{ ts: 1, type: "say", say: "text", text: "hi" }],
+		})
+		client.postSnapshot.mockResolvedValue({ ok: false, status: 404 })
+		const bridge = await activateEligibleBridge()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(client.postSnapshot).toHaveBeenCalled()
+		bridge.dispose()
+	})
+
+	it("deactivates during command poll when eligibility is lost before fetch", async () => {
+		const bridge = await activateEligibleBridge()
+		provider.contextProxy.getProviderSettings.mockReturnValue({
+			apiProvider: providerIdentifiers.openrouter,
+		})
+		client.getCommands.mockClear()
+		await vi.advanceTimersByTimeAsync(2_000)
+		expect(bridge.isActive()).toBe(false)
+		expect(client.getCommands).not.toHaveBeenCalled()
+		bridge.dispose()
+	})
+
+	it("acks unknown command types as failed", async () => {
+		client.getCommands.mockResolvedValueOnce({
+			ok: true,
+			status: 200,
+			body: {
+				commands: [{ commandId: "u1", type: "not_a_real_command" }],
+			},
+		})
+
+		const bridge = await activateEligibleBridge()
+		await vi.advanceTimersByTimeAsync(2_000)
+
+		expect(client.ackCommand).toHaveBeenCalledWith(
+			expect.objectContaining({
+				commandId: "u1",
+				status: "failed",
+				errorCode: "unknown_command",
+			}),
+		)
+		bridge.dispose()
+	})
 })
