@@ -359,4 +359,31 @@ describe("executeRemoteCommand", () => {
 		expect(ackCommand).toHaveBeenCalledTimes(2)
 		expect(ackCommand).toHaveBeenLastCalledWith({ commandId: "dup", status: "acked" })
 	})
+
+	it("releases a failed commandId so redelivery can retry", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const startNewTask = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(undefined)
+		const handledCommandIds = new Set<string>()
+
+		await executeRemoteCommand({
+			command: { commandId: "retry-me", type: "start_task", payload: { text: "go" } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({ startNewTask }),
+			handledCommandIds,
+		})
+		expect(handledCommandIds.has("retry-me")).toBe(false)
+
+		await executeRemoteCommand({
+			command: { commandId: "retry-me", type: "start_task", payload: { text: "go" } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({ startNewTask }),
+			handledCommandIds,
+		})
+
+		expect(startNewTask).toHaveBeenCalledTimes(2)
+		expect(handledCommandIds.has("retry-me")).toBe(true)
+		expect(ackCommand).toHaveBeenLastCalledWith({ commandId: "retry-me", status: "acked" })
+	})
 })

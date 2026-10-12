@@ -78,122 +78,142 @@ export async function executeRemoteCommand(options: {
 		await client.ackCommand({ commandId: command.commandId, status: "acked" })
 		return
 	}
-	// Claim before work so concurrent polls cannot double-apply start_task.
+	// Claim for the in-flight window so concurrent polls cannot double-apply.
+	// Release on every non-applied path so the server can redeliver after a real failure.
 	handledCommandIds?.add(command.commandId)
-
-	if (!host.isEligible()) {
-		await failCommand(client, host, epoch, command.commandId, "not_eligible")
-		return
-	}
+	let applied = false
 
 	try {
-		switch (command.type) {
-			case "message":
-			case "answer_followup":
-				if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
-					return
-				}
-				if (!host.isLifecycleCurrent(epoch)) {
-					return
-				}
-				await host.sendMessage(command.payload?.text, command.payload?.images)
-				if (command.payload?.mode) {
+		if (!host.isEligible()) {
+			await failCommand(client, host, epoch, command.commandId, "not_eligible")
+			return
+		}
+
+		try {
+			switch (command.type) {
+				case "message":
+				case "answer_followup":
+					if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
+						return
+					}
 					if (!host.isLifecycleCurrent(epoch)) {
 						return
 					}
-					await host.handleModeSwitch(command.payload.mode)
+					await host.sendMessage(command.payload?.text, command.payload?.images)
+					if (command.payload?.mode) {
+						if (!host.isLifecycleCurrent(epoch)) {
+							// Message already landed — keep the claim.
+							applied = true
+							return
+						}
+						await host.handleModeSwitch(command.payload.mode)
+					}
+					applied = true
+					break
+				case "approve_ask":
+				case "deny_ask": {
+					if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
+						return
+					}
+					const task = host.getCurrentTask()
+					if (!task) {
+						await failCommand(client, host, epoch, command.commandId, "no_current_task")
+						return
+					}
+					if (!task.hasPendingAsk()) {
+						await failCommand(client, host, epoch, command.commandId, "no_pending_ask")
+						return
+					}
+					if (!host.isLifecycleCurrent(epoch)) {
+						return
+					}
+					if (command.type === "approve_ask") {
+						task.approveAsk({ text: command.payload?.text, images: command.payload?.images })
+					} else {
+						task.denyAsk({ text: command.payload?.text, images: command.payload?.images })
+					}
+					applied = true
+					break
 				}
-				break
-			case "approve_ask":
-			case "deny_ask": {
-				if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
+				case "cancel_task":
+					if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
+						return
+					}
+					if (!host.isLifecycleCurrent(epoch)) {
+						return
+					}
+					await host.cancelCurrentTask()
+					applied = true
+					break
+				case "resume_task":
+					if (!command.taskId) {
+						await failCommand(client, host, epoch, command.commandId, "missing_task_id")
+						return
+					}
+					if (!host.isLifecycleCurrent(epoch)) {
+						return
+					}
+					await host.resumeTask(command.taskId)
+					applied = true
+					break
+				case "start_task":
+					if (!host.isLifecycleCurrent(epoch)) {
+						return
+					}
+					await host.startNewTask({
+						text: command.payload?.text,
+						images: command.payload?.images,
+					})
+					applied = true
+					break
+				case "switch_mode": {
+					const mode = command.payload?.mode
+					if (!mode) {
+						await failCommand(client, host, epoch, command.commandId, "missing_mode")
+						return
+					}
+					if (!host.isLifecycleCurrent(epoch)) {
+						return
+					}
+					await host.handleModeSwitch(mode)
+					applied = true
+					break
+				}
+				case "end_remote_session":
+					if (!host.isLifecycleCurrent(epoch)) {
+						return
+					}
+					await host.endRemoteSession()
+					applied = true
+					break
+				default: {
+					const _exhaustive: never = command.type
+					await failCommand(client, host, epoch, command.commandId, "unknown_command", String(_exhaustive))
 					return
 				}
-				const task = host.getCurrentTask()
-				if (!task) {
-					await failCommand(client, host, epoch, command.commandId, "no_current_task")
-					return
-				}
-				if (!task.hasPendingAsk()) {
-					await failCommand(client, host, epoch, command.commandId, "no_pending_ask")
-					return
-				}
-				if (!host.isLifecycleCurrent(epoch)) {
-					return
-				}
-				if (command.type === "approve_ask") {
-					task.approveAsk({ text: command.payload?.text, images: command.payload?.images })
-				} else {
-					task.denyAsk({ text: command.payload?.text, images: command.payload?.images })
-				}
-				break
 			}
-			case "cancel_task":
-				if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
-					return
-				}
-				if (!host.isLifecycleCurrent(epoch)) {
-					return
-				}
-				await host.cancelCurrentTask()
-				break
-			case "resume_task":
-				if (!command.taskId) {
-					await failCommand(client, host, epoch, command.commandId, "missing_task_id")
-					return
-				}
-				if (!host.isLifecycleCurrent(epoch)) {
-					return
-				}
-				await host.resumeTask(command.taskId)
-				break
-			case "start_task":
-				if (!host.isLifecycleCurrent(epoch)) {
-					return
-				}
-				await host.startNewTask({
-					text: command.payload?.text,
-					images: command.payload?.images,
-				})
-				break
-			case "switch_mode": {
-				const mode = command.payload?.mode
-				if (!mode) {
-					await failCommand(client, host, epoch, command.commandId, "missing_mode")
-					return
-				}
-				if (!host.isLifecycleCurrent(epoch)) {
-					return
-				}
-				await host.handleModeSwitch(mode)
-				break
-			}
-			case "end_remote_session":
-				if (!host.isLifecycleCurrent(epoch)) {
-					return
-				}
-				await host.endRemoteSession()
-				break
-			default: {
-				const _exhaustive: never = command.type
-				await failCommand(client, host, epoch, command.commandId, "unknown_command", String(_exhaustive))
+
+			if (!host.isLifecycleCurrent(epoch)) {
 				return
 			}
+			// Ack 404 (command_not_found) must not mark the bridge unavailable.
+			await client.ackCommand({ commandId: command.commandId, status: "acked" })
+		} catch (error) {
+			// Keep the claim if the host action already landed; only failed attempts are retriable.
+			if (!applied) {
+				await failCommand(
+					client,
+					host,
+					epoch,
+					command.commandId,
+					"execution_failed",
+					error instanceof Error ? error.message : String(error),
+				)
+			}
 		}
-
-		if (!host.isLifecycleCurrent(epoch)) {
-			return
+	} finally {
+		if (!applied) {
+			handledCommandIds?.delete(command.commandId)
 		}
-		// Ack 404 (command_not_found) must not mark the bridge unavailable.
-		await client.ackCommand({ commandId: command.commandId, status: "acked" })
-	} catch (error) {
-		await failCommand(
-			client,
-			host,
-			epoch,
-			command.commandId,
-			"execution_failed",
-			error instanceof Error ? error.message : String(error),
-		)
 	}
 }
