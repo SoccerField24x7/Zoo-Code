@@ -63,8 +63,14 @@ const TaskHeader = ({
 	todos,
 }: TaskHeaderProps) => {
 	const { t } = useTranslation()
-	const { apiConfiguration, currentTaskItem, zooCodeIsAuthenticated, zooCodeBaseUrl, remoteControlEnabled } =
-		useExtensionState()
+	const {
+		apiConfiguration,
+		currentTaskItem,
+		zooCodeIsAuthenticated,
+		zooCodeBaseUrl,
+		remoteControlEnabled,
+		remoteControlAvailable,
+	} = useExtensionState()
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
 
@@ -164,12 +170,26 @@ const TaskHeader = ({
 					</Button>
 				</div>
 			)}
-			{canShowRemoteSteer && isZooGateway && remoteControlEnabled && (
+			{canShowRemoteSteer && isZooGateway && remoteControlEnabled && remoteControlAvailable && (
 				<div
 					className="mb-2 flex items-center justify-between gap-2 rounded border border-vscode-dropdown-border bg-vscode-badge-background/80 p-2 text-sm text-vscode-badge-foreground"
 					onClick={(e) => e.stopPropagation()}
 					data-testid="remote-steer-active">
 					<span>{t("chat:task.steerRemotelyActive")}</span>
+					<button
+						type="button"
+						className="shrink-0 rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
+						onClick={openRemoteDashboard}>
+						{t("chat:task.openRemoteDashboard")}
+					</button>
+				</div>
+			)}
+			{canShowRemoteSteer && isZooGateway && remoteControlEnabled && !remoteControlAvailable && (
+				<div
+					className="mb-2 flex items-center justify-between gap-2 rounded border border-vscode-dropdown-border bg-vscode-editor-background p-2 text-sm"
+					onClick={(e) => e.stopPropagation()}
+					data-testid="remote-steer-unavailable">
+					<span className="text-vscode-descriptionForeground">{t("chat:task.steerRemotelyUnavailable")}</span>
 					<button
 						type="button"
 						className="shrink-0 rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"

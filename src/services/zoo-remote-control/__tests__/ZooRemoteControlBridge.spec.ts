@@ -78,6 +78,7 @@ describe("ZooRemoteControlBridge", () => {
 			},
 			getCurrentTask: vi.fn(() => undefined),
 			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		})
 
 		client = {
@@ -308,7 +309,12 @@ describe("ZooRemoteControlBridge", () => {
 	}
 
 	it("approves and denies asks on the current task", async () => {
-		const task = { approveAsk: vi.fn(), denyAsk: vi.fn() }
+		const task = {
+			taskId: "task-1",
+			hasPendingAsk: vi.fn(() => true),
+			approveAsk: vi.fn(),
+			denyAsk: vi.fn(),
+		}
 		provider.getCurrentTask.mockReturnValue(task)
 		client.getCommands.mockResolvedValueOnce({
 			ok: true,
@@ -692,6 +698,15 @@ describe("ZooRemoteControlBridge", () => {
 		api.emit(RooCodeEventName.TaskIdle, "task-1")
 		await vi.advanceTimersByTimeAsync(100)
 		expect(client.postEvents).toHaveBeenCalled()
+
+		client.postEvents.mockClear()
+		client.postEvents.mockResolvedValue({ ok: true, status: 200 })
+		// not-eligible backoff is 30s; flush only retries after canCallServer() opens again.
+		await vi.advanceTimersByTimeAsync(30_000 + 100)
+		expect(client.postEvents).toHaveBeenCalledWith(
+			"instance-1",
+			expect.arrayContaining([expect.objectContaining({ type: "task_idle", taskId: "task-1" })]),
+		)
 		bridge.dispose()
 	})
 

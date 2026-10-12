@@ -1,4 +1,5 @@
 export * from "./eligibility.js"
+export * from "./availability.js"
 export * from "./executeRemoteCommand.js"
 export * from "./projectMessage.js"
 export * from "./types.js"

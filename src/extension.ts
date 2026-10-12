@@ -391,21 +391,31 @@ export async function activate(context: vscode.ExtensionContext) {
 	const providerFactory = new ClineProviderFactory(context, outputChannel, webviewFocusTracker)
 	const api = new API(outputChannel, provider, providerFactory, socketPath, enableLogging)
 
-	context.subscriptions.push(
-		new ZooRemoteControlBridge({
-			api,
-			provider,
-			context,
-			log: (message) => outputChannel.appendLine(message),
-		}),
-	)
+	zooRemoteControlBridge = new ZooRemoteControlBridge({
+		api,
+		provider,
+		context,
+		log: (message) => outputChannel.appendLine(message),
+	})
+	context.subscriptions.push(zooRemoteControlBridge)
 
 	return api
 }
 
+let zooRemoteControlBridge: ZooRemoteControlBridge | undefined
+
 // This method is called when your extension is deactivated.
 export async function deactivate() {
 	outputChannel.appendLine(`${Package.name} extension deactivated`)
+
+	try {
+		await zooRemoteControlBridge?.shutdown()
+	} catch (error) {
+		outputChannel.appendLine(
+			`Failed to shut down Zoo remote control: ${error instanceof Error ? error.message : String(error)}`,
+		)
+	}
+	zooRemoteControlBridge = undefined
 
 	if (cloudService && CloudService.hasInstance()) {
 		try {

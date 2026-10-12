@@ -1,20 +1,60 @@
 import type { ZooRemoteCommand } from "./types.js"
 import type { ZooRemoteControlClient } from "./ZooRemoteControlClient.js"
 
+export type ZooRemoteCommandHostTask = {
+	taskId: string
+	hasPendingAsk: () => boolean
+	approveAsk: (payload?: { text?: string; images?: string[] }) => void
+	denyAsk: (payload?: { text?: string; images?: string[] }) => void
+}
+
 export type ZooRemoteCommandHost = {
 	isLifecycleCurrent: (epoch: number) => boolean
 	isEligible: () => boolean
 	sendMessage: (text?: string, images?: string[]) => Promise<void>
 	handleModeSwitch: (mode: string) => Promise<void>
-	getCurrentTask: () =>
-		| {
-				approveAsk: (payload?: { text?: string; images?: string[] }) => void
-				denyAsk: (payload?: { text?: string; images?: string[] }) => void
-		  }
-		| undefined
+	getCurrentTask: () => ZooRemoteCommandHostTask | undefined
 	cancelCurrentTask: () => Promise<void>
 	resumeTask: (taskId: string) => Promise<void>
 	startNewTask: (payload: { text?: string; images?: string[] }) => Promise<void>
+}
+
+async function failCommand(
+	client: Pick<ZooRemoteControlClient, "ackCommand">,
+	host: ZooRemoteCommandHost,
+	epoch: number,
+	commandId: string,
+	errorCode: string,
+	message?: string,
+): Promise<void> {
+	if (!host.isLifecycleCurrent(epoch)) {
+		return
+	}
+	await client.ackCommand({
+		commandId,
+		status: "failed",
+		errorCode,
+		...(message ? { message } : {}),
+	})
+}
+
+/** When a command targets a task id, require it to match the live task. */
+async function ensureTaskTarget(options: {
+	command: ZooRemoteCommand
+	epoch: number
+	client: Pick<ZooRemoteControlClient, "ackCommand">
+	host: ZooRemoteCommandHost
+}): Promise<boolean> {
+	const { command, epoch, client, host } = options
+	if (!command.taskId) {
+		return true
+	}
+	const currentId = host.getCurrentTask()?.taskId
+	if (currentId === command.taskId) {
+		return true
+	}
+	await failCommand(client, host, epoch, command.commandId, "task_mismatch")
+	return false
 }
 
 /** Apply one remote command through host callbacks, respecting lifecycle epoch checks. */
@@ -31,14 +71,7 @@ export async function executeRemoteCommand(options: {
 	}
 
 	if (!host.isEligible()) {
-		if (!host.isLifecycleCurrent(epoch)) {
-			return
-		}
-		await client.ackCommand({
-			commandId: command.commandId,
-			status: "failed",
-			errorCode: "not_eligible",
-		})
+		await failCommand(client, host, epoch, command.commandId, "not_eligible")
 		return
 	}
 
@@ -46,6 +79,9 @@ export async function executeRemoteCommand(options: {
 		switch (command.type) {
 			case "message":
 			case "answer_followup":
+				if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
+					return
+				}
 				if (!host.isLifecycleCurrent(epoch)) {
 					return
 				}
@@ -57,45 +93,34 @@ export async function executeRemoteCommand(options: {
 					await host.handleModeSwitch(command.payload.mode)
 				}
 				break
-			case "approve_ask": {
-				const task = host.getCurrentTask()
-				if (!task) {
-					if (!host.isLifecycleCurrent(epoch)) {
-						return
-					}
-					await client.ackCommand({
-						commandId: command.commandId,
-						status: "failed",
-						errorCode: "no_current_task",
-					})
-					return
-				}
-				if (!host.isLifecycleCurrent(epoch)) {
-					return
-				}
-				task.approveAsk({ text: command.payload?.text, images: command.payload?.images })
-				break
-			}
+			case "approve_ask":
 			case "deny_ask": {
+				if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
+					return
+				}
 				const task = host.getCurrentTask()
 				if (!task) {
-					if (!host.isLifecycleCurrent(epoch)) {
-						return
-					}
-					await client.ackCommand({
-						commandId: command.commandId,
-						status: "failed",
-						errorCode: "no_current_task",
-					})
+					await failCommand(client, host, epoch, command.commandId, "no_current_task")
+					return
+				}
+				if (!task.hasPendingAsk()) {
+					await failCommand(client, host, epoch, command.commandId, "no_pending_ask")
 					return
 				}
 				if (!host.isLifecycleCurrent(epoch)) {
 					return
 				}
-				task.denyAsk({ text: command.payload?.text, images: command.payload?.images })
+				if (command.type === "approve_ask") {
+					task.approveAsk({ text: command.payload?.text, images: command.payload?.images })
+				} else {
+					task.denyAsk({ text: command.payload?.text, images: command.payload?.images })
+				}
 				break
 			}
 			case "cancel_task":
+				if (!(await ensureTaskTarget({ command, epoch, client, host }))) {
+					return
+				}
 				if (!host.isLifecycleCurrent(epoch)) {
 					return
 				}
@@ -103,14 +128,7 @@ export async function executeRemoteCommand(options: {
 				break
 			case "resume_task":
 				if (!command.taskId) {
-					if (!host.isLifecycleCurrent(epoch)) {
-						return
-					}
-					await client.ackCommand({
-						commandId: command.commandId,
-						status: "failed",
-						errorCode: "missing_task_id",
-					})
+					await failCommand(client, host, epoch, command.commandId, "missing_task_id")
 					return
 				}
 				if (!host.isLifecycleCurrent(epoch)) {
@@ -130,14 +148,7 @@ export async function executeRemoteCommand(options: {
 			case "switch_mode": {
 				const mode = command.payload?.mode
 				if (!mode) {
-					if (!host.isLifecycleCurrent(epoch)) {
-						return
-					}
-					await client.ackCommand({
-						commandId: command.commandId,
-						status: "failed",
-						errorCode: "missing_mode",
-					})
+					await failCommand(client, host, epoch, command.commandId, "missing_mode")
 					return
 				}
 				if (!host.isLifecycleCurrent(epoch)) {
@@ -148,15 +159,7 @@ export async function executeRemoteCommand(options: {
 			}
 			default: {
 				const _exhaustive: never = command.type
-				if (!host.isLifecycleCurrent(epoch)) {
-					return
-				}
-				await client.ackCommand({
-					commandId: command.commandId,
-					status: "failed",
-					errorCode: "unknown_command",
-					message: String(_exhaustive),
-				})
+				await failCommand(client, host, epoch, command.commandId, "unknown_command", String(_exhaustive))
 				return
 			}
 		}
@@ -167,14 +170,13 @@ export async function executeRemoteCommand(options: {
 		// Ack 404 (command_not_found) must not mark the bridge unavailable.
 		await client.ackCommand({ commandId: command.commandId, status: "acked" })
 	} catch (error) {
-		if (!host.isLifecycleCurrent(epoch)) {
-			return
-		}
-		await client.ackCommand({
-			commandId: command.commandId,
-			status: "failed",
-			errorCode: "execution_failed",
-			message: error instanceof Error ? error.message : String(error),
-		})
+		await failCommand(
+			client,
+			host,
+			epoch,
+			command.commandId,
+			"execution_failed",
+			error instanceof Error ? error.message : String(error),
+		)
 	}
 }

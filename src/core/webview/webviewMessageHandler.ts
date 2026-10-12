@@ -1953,7 +1953,16 @@ export const webviewMessageHandler = async (
 
 			if (setting !== undefined && value !== undefined) {
 				if (ALLOWED_VSCODE_SETTINGS.has(setting)) {
-					await vscode.workspace.getConfiguration().update(setting, value, true)
+					const config = vscode.workspace.getConfiguration()
+					const inspected = config.inspect(setting)
+					// Prefer the winning workspace scope so enabling is not no-oped by workspace `false`.
+					const target =
+						inspected?.workspaceFolderValue !== undefined
+							? vscode.ConfigurationTarget.WorkspaceFolder
+							: inspected?.workspaceValue !== undefined || vscode.workspace.workspaceFolders?.length
+								? vscode.ConfigurationTarget.Workspace
+								: vscode.ConfigurationTarget.Global
+					await config.update(setting, value, target)
 					if (setting === "zoo-code.remoteControl.enabled") {
 						await provider.postStateToWebview()
 					}

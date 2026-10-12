@@ -19,7 +19,14 @@
 		"openUiHistory": "UI इतिहास खोलें",
 		"backToParentTask": "मूल कार्य",
 		"waitingOnSubtask": "उपकार्य की प्रतीक्षा",
-		"goToSubtask": "उपकार्य पर जाएं"
+		"goToSubtask": "उपकार्य पर जाएं",
+		"steerRemotely": "Steer this task remotely",
+		"steerRemotelyHint": "Enables remote control for this workspace and opens the dashboard so you can approve, reply, and continue from there.",
+		"steerRemotelyNeedsGateway": "Switch this profile to Zoo Gateway before you can steer the task remotely.",
+		"steerRemotelyOpenSettings": "Open settings",
+		"steerRemotelyActive": "Remote steer is on — control this task from the Zoo dashboard.",
+		"steerRemotelyUnavailable": "Remote steer is enabled, but the Zoo dashboard endpoint is unreachable. Retry shortly or check your connection.",
+		"openRemoteDashboard": "Open dashboard"
 	},
 	"unpin": "पिन करें",
 	"pin": "अवपिन करें",

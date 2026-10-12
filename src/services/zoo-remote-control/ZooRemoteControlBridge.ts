@@ -5,6 +5,7 @@ import {
 	isZooRemoteControlEligible,
 	projectClineMessageForRemote,
 	projectClineMessagesForSnapshot,
+	setZooRemoteControlAvailable,
 	ZooRemoteControlClient,
 	type ZooRemoteCommand,
 	type ZooRemoteEvent,
@@ -19,6 +20,7 @@ import {
 
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { Package } from "../../shared/package"
+import type { Mode } from "../../shared/modes"
 import { getCachedZooCodeToken, getZooCodeBaseUrl } from "../zoo-code-auth"
 
 const PRESENCE_INTERVAL_MS = 15_000
@@ -52,6 +54,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	private disposed = false
 	private active = false
 	private serverAvailable = true
+	private lastPostedAvailability: boolean | undefined
 	private unavailableUntil = 0
 	private eventSeq: number
 	private pendingEvents: ZooRemoteEvent[] = []
@@ -148,10 +151,28 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		void this.syncActiveState()
 	}
 
+	/** Awaitable teardown so offline presence can finish before extension deactivate returns. */
+	public async shutdown(): Promise<void> {
+		if (this.disposed) {
+			return
+		}
+		this.lifecycleEpoch += 1
+		await this.deactivate({ notifyOffline: true })
+		this.releaseResources()
+	}
+
 	public dispose(): void {
-		this.disposed = true
+		if (this.disposed) {
+			return
+		}
 		this.lifecycleEpoch += 1
 		void this.deactivate({ notifyOffline: true })
+		this.releaseResources()
+	}
+
+	private releaseResources(): void {
+		this.disposed = true
+		setZooRemoteControlAvailable(false)
 		if (typeof this.provider.off === "function") {
 			this.provider.off(RooCodeEventName.ProviderProfileChanged, this.onProviderProfileChanged)
 		}
@@ -279,8 +300,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		}
 
 		this.active = true
-		this.serverAvailable = true
-		this.unavailableUntil = 0
+		this.setServerAvailable(true)
 		this.bindApiListeners(true)
 		this.presenceTimer = setInterval(() => {
 			void this.publishPresence(true)
@@ -310,6 +330,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		this.bindApiListeners(false)
 		this.pendingEvents = []
 		this.pendingPartials.clear()
+		this.publishAvailabilityToWebview()
 
 		if (notifyOffline) {
 			// Always try offline presence while a session token remains (even if provider changed).
@@ -425,11 +446,35 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	private markUnavailable(): void {
 		this.serverAvailable = false
 		this.unavailableUntil = this.now() + UNAVAILABLE_BACKOFF_MS
+		this.publishAvailabilityToWebview()
 	}
 
 	private markNotEligibleBackoff(): void {
 		this.serverAvailable = false
 		this.unavailableUntil = this.now() + NOT_ELIGIBLE_BACKOFF_MS
+		this.publishAvailabilityToWebview()
+	}
+
+	private setServerAvailable(available: boolean): void {
+		this.serverAvailable = available
+		if (available) {
+			this.unavailableUntil = 0
+		}
+		this.publishAvailabilityToWebview()
+	}
+
+	private isServerAvailable(): boolean {
+		return this.serverAvailable || this.now() >= this.unavailableUntil
+	}
+
+	private publishAvailabilityToWebview(): void {
+		const available = this.active && this.isServerAvailable()
+		if (this.lastPostedAvailability === available) {
+			return
+		}
+		this.lastPostedAvailability = available
+		setZooRemoteControlAvailable(available)
+		void this.provider.postStateToWebview()
 	}
 
 	private canCallServer(): boolean {
@@ -492,7 +537,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		}
 
 		if (result.ok) {
-			this.serverAvailable = true
+			this.setServerAvailable(true)
 		}
 	}
 
@@ -531,7 +576,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		}
 
 		if (result.ok) {
-			this.serverAvailable = true
+			this.setServerAvailable(true)
 		}
 	}
 
@@ -569,7 +614,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			return
 		}
 
-		this.serverAvailable = true
+		this.setServerAvailable(true)
 	}
 
 	private async pollCommands(): Promise<void> {
@@ -605,7 +650,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				return
 			}
 
-			this.serverAvailable = true
+			this.setServerAvailable(true)
 
 			for (const command of result.body.commands) {
 				if (!this.isLifecycleCurrent(epoch)) {
@@ -627,8 +672,19 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				isLifecycleCurrent: (value) => this.isLifecycleCurrent(value),
 				isEligible: () => this.evaluateEligible(),
 				sendMessage: (text, images) => this.api.sendMessage(text, images),
-				handleModeSwitch: (mode) => this.provider.handleModeSwitch(mode as never),
-				getCurrentTask: () => this.provider.getCurrentTask() as never,
+				handleModeSwitch: (mode) => this.provider.handleModeSwitch(mode as Mode),
+				getCurrentTask: () => {
+					const task = this.provider.getCurrentTask()
+					if (!task) {
+						return undefined
+					}
+					return {
+						taskId: task.taskId,
+						hasPendingAsk: () => task.hasPendingAsk(),
+						approveAsk: (payload) => task.approveAsk(payload),
+						denyAsk: (payload) => task.denyAsk(payload),
+					}
+				},
 				cancelCurrentTask: () => this.api.cancelCurrentTask(),
 				resumeTask: (taskId) => this.api.resumeTask(taskId),
 				startNewTask: async (payload) => {

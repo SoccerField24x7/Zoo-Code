@@ -5,6 +5,7 @@ import {
 	projectClineMessagesForSnapshot,
 	REMOTE_MESSAGE_IMAGE_MAX_CHARS,
 	REMOTE_MESSAGE_IMAGE_MAX_COUNT,
+	REMOTE_MESSAGE_JSON_MAX_CHARS,
 	REMOTE_MESSAGE_TEXT_MAX_CHARS,
 	REMOTE_SNAPSHOT_MAX_MESSAGES,
 } from "../projectMessage.js"
@@ -90,6 +91,24 @@ describe("projectClineMessageForRemote", () => {
 				text: `{${"n".repeat(REMOTE_MESSAGE_TEXT_MAX_CHARS + 20)}`,
 			}).text,
 		).toContain("[truncated")
+	})
+
+	it("enforces an aggregate serialized character budget across many large fields", () => {
+		const chunk = "z".repeat(20_000)
+		const shaped = projectClineMessageForRemote({
+			ts: 1,
+			type: "ask",
+			ask: "tool",
+			text: JSON.stringify({
+				a: chunk,
+				b: chunk,
+				c: chunk,
+				d: chunk,
+				e: chunk,
+				f: chunk,
+			}),
+		})
+		expect(shaped.text!.length).toBeLessThanOrEqual(REMOTE_MESSAGE_JSON_MAX_CHARS + 80)
 	})
 
 	it("recursively truncates nested tool JSON strings beyond top-level keys", () => {

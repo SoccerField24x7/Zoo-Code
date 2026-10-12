@@ -60,6 +60,7 @@ const mockExtensionState: {
 	zooCodeIsAuthenticated?: boolean
 	zooCodeBaseUrl?: string
 	remoteControlEnabled?: boolean
+	remoteControlAvailable?: boolean
 } = {
 	apiConfiguration: {
 		apiProvider: providerIdentifiers.anthropic,
@@ -71,6 +72,7 @@ const mockExtensionState: {
 	taskHistory: [],
 	zooCodeIsAuthenticated: false,
 	remoteControlEnabled: false,
+	remoteControlAvailable: false,
 }
 
 // Mock the ExtensionStateContext
@@ -360,6 +362,8 @@ describe("TaskHeader", () => {
 			} as ProviderSettings
 			mockExtensionState.zooCodeIsAuthenticated = true
 			mockExtensionState.remoteControlEnabled = false
+			mockExtensionState.remoteControlAvailable = false
+			mockExtensionState.zooCodeBaseUrl = undefined
 			mockExtensionState.clineMessages = [{ type: "say", say: "completion_result", ts: 1, text: "done" }]
 		})
 
@@ -371,6 +375,8 @@ describe("TaskHeader", () => {
 			} as ProviderSettings
 			mockExtensionState.zooCodeIsAuthenticated = false
 			mockExtensionState.remoteControlEnabled = false
+			mockExtensionState.remoteControlAvailable = false
+			mockExtensionState.zooCodeBaseUrl = undefined
 			mockExtensionState.clineMessages = []
 		})
 
@@ -393,6 +399,7 @@ describe("TaskHeader", () => {
 
 		it("shows the active remote steer strip with a dashboard link", () => {
 			mockExtensionState.remoteControlEnabled = true
+			mockExtensionState.remoteControlAvailable = true
 			mockExtensionState.zooCodeBaseUrl = "https://www.zoocode.dev"
 			renderTaskHeader()
 
@@ -402,6 +409,17 @@ describe("TaskHeader", () => {
 				type: "openExternal",
 				url: "https://www.zoocode.dev/dashboard/agents/ide",
 			})
+		})
+
+		it("shows unavailable state when remote control is enabled but the bridge is down", () => {
+			mockExtensionState.remoteControlEnabled = true
+			mockExtensionState.remoteControlAvailable = false
+			renderTaskHeader()
+
+			expect(screen.getByTestId("remote-steer-unavailable")).toHaveTextContent(
+				"chat:task.steerRemotelyUnavailable",
+			)
+			expect(screen.queryByTestId("remote-steer-active")).not.toBeInTheDocument()
 		})
 
 		it("prompts to switch to Zoo Gateway when the active profile is not eligible", () => {

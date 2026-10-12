@@ -19,7 +19,14 @@
 		"openUiHistory": "UI 기록 열기",
 		"backToParentTask": "상위 작업",
 		"waitingOnSubtask": "하위 작업 대기 중",
-		"goToSubtask": "하위 작업으로 이동"
+		"goToSubtask": "하위 작업으로 이동",
+		"steerRemotely": "Steer this task remotely",
+		"steerRemotelyHint": "Enables remote control for this workspace and opens the dashboard so you can approve, reply, and continue from there.",
+		"steerRemotelyNeedsGateway": "Switch this profile to Zoo Gateway before you can steer the task remotely.",
+		"steerRemotelyOpenSettings": "Open settings",
+		"steerRemotelyActive": "Remote steer is on — control this task from the Zoo dashboard.",
+		"steerRemotelyUnavailable": "Remote steer is enabled, but the Zoo dashboard endpoint is unreachable. Retry shortly or check your connection.",
+		"openRemoteDashboard": "Open dashboard"
 	},
 	"unpin": "고정 해제하기",
 	"pin": "고정하기",

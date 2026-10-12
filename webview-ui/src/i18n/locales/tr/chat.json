@@ -19,7 +19,14 @@
 		"openUiHistory": "UI Geçmişini Aç",
 		"backToParentTask": "Üst görev",
 		"waitingOnSubtask": "Alt görev bekleniyor",
-		"goToSubtask": "Alt göreve git"
+		"goToSubtask": "Alt göreve git",
+		"steerRemotely": "Steer this task remotely",
+		"steerRemotelyHint": "Enables remote control for this workspace and opens the dashboard so you can approve, reply, and continue from there.",
+		"steerRemotelyNeedsGateway": "Switch this profile to Zoo Gateway before you can steer the task remotely.",
+		"steerRemotelyOpenSettings": "Open settings",
+		"steerRemotelyActive": "Remote steer is on — control this task from the Zoo dashboard.",
+		"steerRemotelyUnavailable": "Remote steer is enabled, but the Zoo dashboard endpoint is unreachable. Retry shortly or check your connection.",
+		"openRemoteDashboard": "Open dashboard"
 	},
 	"unpin": "Sabitlemeyi iptal et",
 	"pin": "Sabitle",

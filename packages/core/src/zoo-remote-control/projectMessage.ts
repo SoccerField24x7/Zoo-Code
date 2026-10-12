@@ -7,27 +7,36 @@ export const REMOTE_MESSAGE_IMAGE_MAX_CHARS = 8_000
 export const REMOTE_SNAPSHOT_MAX_MESSAGES = 80
 /** Cap nested arrays (e.g. batchDiffs) so snapshots stay bounded. */
 export const REMOTE_MESSAGE_ARRAY_MAX_ITEMS = 20
+/** Aggregate serialized-character budget for a single tool JSON payload. */
+export const REMOTE_MESSAGE_JSON_MAX_CHARS = 96_000
 
 function truncateString(value: string, max: number): string {
+	if (max <= 0) {
+		return ""
+	}
 	if (value.length <= max) {
 		return value
 	}
-	return `${value.slice(0, max)}\n…[truncated ${value.length - max} chars]`
+	// Keep the returned length within `max` (marker fits inside the budget).
+	const marker = `\n…[truncated ${value.length - max} chars]`
+	const head = Math.max(0, max - marker.length)
+	return `${value.slice(0, head)}${marker}`
 }
 
-function boundJsonValue(value: unknown): unknown {
+/** Bound nested JSON while preserving keys/array slots; `stringCap` limits each string. */
+function boundJsonValue(value: unknown, stringCap: number): unknown {
 	if (typeof value === "string") {
-		return truncateString(value, REMOTE_MESSAGE_TEXT_MAX_CHARS)
+		return truncateString(value, stringCap)
 	}
 
 	if (Array.isArray(value)) {
-		return value.slice(0, REMOTE_MESSAGE_ARRAY_MAX_ITEMS).map((entry) => boundJsonValue(entry))
+		return value.slice(0, REMOTE_MESSAGE_ARRAY_MAX_ITEMS).map((entry) => boundJsonValue(entry, stringCap))
 	}
 
 	if (value && typeof value === "object") {
 		const record: Record<string, unknown> = {}
 		for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-			record[key] = boundJsonValue(child)
+			record[key] = boundJsonValue(child, stringCap)
 		}
 		return record
 	}
@@ -42,7 +51,23 @@ function shapeToolText(text: string): string {
 			return truncateString(text, REMOTE_MESSAGE_TEXT_MAX_CHARS)
 		}
 
-		return JSON.stringify(boundJsonValue(parsed))
+		let stringCap = REMOTE_MESSAGE_TEXT_MAX_CHARS
+		let bounded = boundJsonValue(parsed, stringCap)
+		let serialized = JSON.stringify(bounded)
+
+		// If the payload is still too large, shrink every string together so structure
+		// (keys, array slots, small metadata) stays intact under the aggregate budget.
+		while (serialized.length > REMOTE_MESSAGE_JSON_MAX_CHARS && stringCap > 512) {
+			stringCap = Math.floor(stringCap * 0.5)
+			bounded = boundJsonValue(parsed, stringCap)
+			serialized = JSON.stringify(bounded)
+		}
+
+		if (serialized.length > REMOTE_MESSAGE_JSON_MAX_CHARS) {
+			return truncateString(serialized, REMOTE_MESSAGE_JSON_MAX_CHARS)
+		}
+
+		return serialized
 	} catch {
 		return truncateString(text, REMOTE_MESSAGE_TEXT_MAX_CHARS)
 	}
