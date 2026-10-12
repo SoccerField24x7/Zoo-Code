@@ -364,7 +364,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		}
 
 		const batch = this.pendingEvents.splice(0, this.pendingEvents.length)
-		const result = await this.client.postEvents(batch)
+		const result = await this.client.postEvents(this.instanceId, batch)
 
 		if (result.status === 404) {
 			this.markUnavailable()

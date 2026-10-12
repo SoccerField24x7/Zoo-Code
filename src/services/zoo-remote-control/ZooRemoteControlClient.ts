@@ -35,8 +35,8 @@ export class ZooRemoteControlClient {
 		return this.request("POST", "/api/extension/remote/presence", presence)
 	}
 
-	async postEvents(events: ZooRemoteEvent[]): Promise<{ ok: boolean; status: number }> {
-		return this.request("POST", "/api/extension/remote/events", { events })
+	async postEvents(instanceId: string, events: ZooRemoteEvent[]): Promise<{ ok: boolean; status: number }> {
+		return this.request("POST", "/api/extension/remote/events", { instanceId, events })
 	}
 
 	async getCommands(instanceId: string): Promise<{

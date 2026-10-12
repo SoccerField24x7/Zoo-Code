@@ -60,12 +60,12 @@ describe("ZooRemoteControlClient", () => {
 	it("posts events", async () => {
 		fetchFn.mockResolvedValue({ ok: true, status: 200 })
 		const events = [{ type: "task_idle" as const, taskId: "t1", timestamp: 1 }]
-		await client.postEvents(events)
+		await client.postEvents("inst-1", events)
 		expect(fetchFn).toHaveBeenCalledWith(
 			"https://www.zoocode.dev/api/extension/remote/events",
 			expect.objectContaining({
 				method: "POST",
-				body: JSON.stringify({ events }),
+				body: JSON.stringify({ instanceId: "inst-1", events }),
 			}),
 		)
 	})
@@ -108,7 +108,7 @@ describe("ZooRemoteControlClient", () => {
 
 	it("logs non-404 failures", async () => {
 		fetchFn.mockResolvedValue({ ok: false, status: 500 })
-		await client.postEvents([])
+		await client.postEvents("inst-1", [])
 		expect(log).toHaveBeenCalledWith(expect.stringContaining("500"))
 	})
 

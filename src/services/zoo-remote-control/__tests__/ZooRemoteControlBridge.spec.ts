@@ -220,6 +220,7 @@ describe("ZooRemoteControlBridge", () => {
 		await vi.advanceTimersByTimeAsync(100)
 
 		expect(client.postEvents).toHaveBeenCalledWith(
+			"instance-1",
 			expect.arrayContaining([
 				expect.objectContaining({
 					type: "message",
@@ -419,6 +420,7 @@ describe("ZooRemoteControlBridge", () => {
 		await vi.advanceTimersByTimeAsync(100)
 
 		expect(client.postEvents).toHaveBeenCalledWith(
+			"instance-1",
 			expect.arrayContaining([
 				expect.objectContaining({ type: "task_interactive", taskId: "task-1" }),
 				expect.objectContaining({ type: "task_idle", taskId: "task-1" }),
@@ -444,6 +446,7 @@ describe("ZooRemoteControlBridge", () => {
 		await vi.advanceTimersByTimeAsync(100)
 
 		expect(client.postEvents).toHaveBeenCalledWith(
+			"instance-1",
 			expect.arrayContaining([expect.objectContaining({ type: "task_idle", taskId: "task-1" })]),
 		)
 		bridge.dispose()
