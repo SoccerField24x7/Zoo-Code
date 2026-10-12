@@ -631,7 +631,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				getCurrentTask: () => this.provider.getCurrentTask() as never,
 				cancelCurrentTask: () => this.api.cancelCurrentTask(),
 				resumeTask: (taskId) => this.api.resumeTask(taskId),
-				startNewTask: (payload) => this.api.startNewTask(payload),
+				startNewTask: async (payload) => {
+					await this.api.startNewTask(payload)
+				},
 			},
 		})
 	}
