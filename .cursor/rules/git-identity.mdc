@@ -1,0 +1,44 @@
+---
+description: Confirm JamesRobert20 is the active GitHub/git identity before any git or gh work
+alwaysApply: true
+---
+
+# Git / GitHub identity — JamesRobert20 only
+
+Before **any** `git` or `gh` operation that creates commits, issues, PRs, comments, or pushes in this repo:
+
+## Required identity
+
+- **GitHub login (active `gh` account):** `JamesRobert20`
+- **Git author name:** `JamesRobert20`
+- **Git author email:** `59908268+JamesRobert20@users.noreply.github.com` (or the matching JamesRobert20 noreply / `jmtendamema@gmail.com` if that is how this machine is configured for JamesRobert20)
+
+## Preflight (must run first)
+
+```bash
+gh auth status
+git config --get user.name
+git config --get user.email
+```
+
+`gh auth status` must show **JamesRobert20** as `Active account: true`.
+
+## If the wrong account is active
+
+**Stop.** Do not create issues, PRs, commits, or comments.
+
+Especially never use the work GitHub account **`jmtendamema`** for this open-source repo (or for any Zoo Code OSS contribution).
+
+Switch with:
+
+```bash
+gh auth switch --user JamesRobert20
+```
+
+Re-check `gh auth status`. Only then continue.
+
+## Forbidden
+
+- Using `jmtendamema` (or any non-JamesRobert20 account) for Zoo-Code issues, PRs, reviews, or pushes
+- Skipping the preflight because “we already checked earlier in the session”
+- Leaving work-account artifacts (issues/comments) without closing or correcting them when discovered

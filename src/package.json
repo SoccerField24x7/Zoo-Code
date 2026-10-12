@@ -297,6 +297,11 @@
 		"configuration": {
 			"title": "%configuration.title%",
 			"properties": {
+				"zoo-code.remoteControl.enabled": {
+					"type": "boolean",
+					"default": false,
+					"description": "%settings.remoteControl.enabled.description%"
+				},
 				"zoo-code.allowedCommands": {
 					"type": "array",
 					"items": {

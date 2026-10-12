@@ -39,6 +39,7 @@ import { McpServerManager } from "./services/mcp/McpServerManager"
 import { CodeIndexManagerRegistry } from "./services/code-index/code-index-manager-registry"
 import { CodeIndexScope } from "./services/code-index/code-index-scope"
 import { MdmService } from "./services/mdm/MdmService"
+import { ZooRemoteControlBridge } from "./services/zoo-remote-control/ZooRemoteControlBridge"
 import { migrateSettings } from "./utils/migrateSettings"
 import { autoImportSettings } from "./utils/autoImportSettings"
 import { API } from "./extension/api"
@@ -388,7 +389,18 @@ export async function activate(context: vscode.ExtensionContext) {
 	})
 
 	const providerFactory = new ClineProviderFactory(context, outputChannel, webviewFocusTracker)
-	return new API(outputChannel, provider, providerFactory, socketPath, enableLogging)
+	const api = new API(outputChannel, provider, providerFactory, socketPath, enableLogging)
+
+	context.subscriptions.push(
+		new ZooRemoteControlBridge({
+			api,
+			provider,
+			context,
+			log: (message) => outputChannel.appendLine(message),
+		}),
+	)
+
+	return api
 }
 
 // This method is called when your extension is deactivated.
