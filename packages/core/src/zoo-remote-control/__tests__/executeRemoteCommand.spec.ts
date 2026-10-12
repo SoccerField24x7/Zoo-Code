@@ -337,17 +337,29 @@ describe("executeRemoteCommand", () => {
 
 	it("acks duplicate commandIds without re-running the host action", async () => {
 		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
-		const startNewTask = vi.fn().mockResolvedValue(undefined)
+		let markStarted: () => void = () => {}
+		const started = new Promise<void>((resolve) => {
+			markStarted = resolve
+		})
+		let releaseStart: () => void = () => {}
+		const canFinish = new Promise<void>((resolve) => {
+			releaseStart = resolve
+		})
+		const startNewTask = vi.fn(async () => {
+			markStarted()
+			await canFinish
+		})
 		const handledCommandIds = new Set<string>()
 
-		await executeRemoteCommand({
+		const firstExecution = executeRemoteCommand({
 			command: { commandId: "dup", type: "start_task", payload: { text: "first" } },
 			epoch: 1,
 			client: { ackCommand },
 			host: makeHost({ startNewTask }),
 			handledCommandIds,
 		})
-		await executeRemoteCommand({
+		await started
+		const secondExecution = executeRemoteCommand({
 			command: { commandId: "dup", type: "start_task", payload: { text: "again" } },
 			epoch: 1,
 			client: { ackCommand },
@@ -356,6 +368,8 @@ describe("executeRemoteCommand", () => {
 		})
 
 		expect(startNewTask).toHaveBeenCalledTimes(1)
+		releaseStart()
+		await Promise.all([firstExecution, secondExecution])
 		expect(ackCommand).toHaveBeenCalledTimes(2)
 		expect(ackCommand).toHaveBeenLastCalledWith({ commandId: "dup", status: "acked" })
 	})
@@ -373,6 +387,12 @@ describe("executeRemoteCommand", () => {
 			handledCommandIds,
 		})
 		expect(handledCommandIds.has("retry-me")).toBe(false)
+		expect(ackCommand).toHaveBeenLastCalledWith({
+			commandId: "retry-me",
+			status: "failed",
+			errorCode: "execution_failed",
+			message: "boom",
+		})
 
 		await executeRemoteCommand({
 			command: { commandId: "retry-me", type: "start_task", payload: { text: "go" } },
