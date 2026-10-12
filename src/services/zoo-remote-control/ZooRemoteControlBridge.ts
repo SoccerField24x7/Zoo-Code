@@ -57,6 +57,14 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	private pendingEvents: ZooRemoteEvent[] = []
 	private lastPartialFlushAt = 0
 	private pendingPartials = new Map<string, { taskId: string; action?: string; message: ClineMessage }>()
+	/** Resolves true once instance id is durable in globalState (or already was). */
+	private readonly identityReady: Promise<boolean>
+	/** Serializes event-seq writes so updates cannot complete out of order. */
+	private eventSeqPersistChain: Promise<void> = Promise.resolve()
+	private eventSeqPersistFailed = false
+	/** Bumped on deactivate/dispose so in-flight polls/flushes become no-ops. */
+	private lifecycleEpoch = 0
+	private commandPollInFlight = false
 
 	private presenceTimer: ReturnType<typeof setInterval> | undefined
 	private commandTimer: ReturnType<typeof setInterval> | undefined
@@ -101,7 +109,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		this.context = deps.context
 		this.log = deps.log ?? (() => {})
 		this.now = deps.now ?? (() => Date.now())
-		this.instanceId = this.resolveInstanceId()
+		const identity = this.resolveInstanceId()
+		this.instanceId = identity.id
+		this.identityReady = identity.needsPersist ? this.persistInstanceId(identity.id) : Promise.resolve(true)
 		this.eventSeq = this.resolveEventSeq()
 		this.client =
 			deps.client ??
@@ -140,6 +150,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 	public dispose(): void {
 		this.disposed = true
+		this.lifecycleEpoch += 1
 		void this.deactivate({ notifyOffline: true })
 		if (typeof this.provider.off === "function") {
 			this.provider.off(RooCodeEventName.ProviderProfileChanged, this.onProviderProfileChanged)
@@ -148,6 +159,10 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			disposable.dispose()
 		}
 		this.disposables.length = 0
+	}
+
+	private isLifecycleCurrent(epoch: number): boolean {
+		return !this.disposed && this.active && epoch === this.lifecycleEpoch
 	}
 
 	/** Test helper */
@@ -160,10 +175,10 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		return this.instanceId
 	}
 
-	private resolveInstanceId(): string {
+	private resolveInstanceId(): { id: string; needsPersist: boolean } {
 		const existing = this.context.globalState.get<string>(INSTANCE_ID_STATE_KEY)
 		if (existing) {
-			return existing
+			return { id: existing, needsPersist: false }
 		}
 
 		const generated =
@@ -171,8 +186,19 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				? vscode.env.sessionId
 				: `zoo-${this.now()}-${Math.random().toString(36).slice(2, 10)}`
 
-		void this.context.globalState.update(INSTANCE_ID_STATE_KEY, generated)
-		return generated
+		return { id: generated, needsPersist: true }
+	}
+
+	private async persistInstanceId(id: string): Promise<boolean> {
+		try {
+			await this.context.globalState.update(INSTANCE_ID_STATE_KEY, id)
+			return true
+		} catch (error) {
+			this.log(
+				`[ZooRemoteControl] failed to persist instance id: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			return false
+		}
 	}
 
 	private resolveEventSeq(): number {
@@ -181,7 +207,20 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private persistEventSeq(): void {
-		void this.context.globalState.update(EVENT_SEQ_STATE_KEY, this.eventSeq)
+		this.eventSeqPersistChain = this.eventSeqPersistChain
+			.then(async () => {
+				if (this.disposed || this.eventSeqPersistFailed) {
+					return
+				}
+				await this.context.globalState.update(EVENT_SEQ_STATE_KEY, this.eventSeq)
+			})
+			.catch((error: unknown) => {
+				this.eventSeqPersistFailed = true
+				this.pendingEvents = []
+				this.log(
+					`[ZooRemoteControl] failed to persist event seq: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			})
 	}
 
 	private isSettingEnabled(): boolean {
@@ -233,6 +272,12 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			return
 		}
 
+		const identityOk = await this.identityReady
+		if (!identityOk || this.disposed) {
+			this.log("[ZooRemoteControl] refusing to activate: instance id is not persisted")
+			return
+		}
+
 		this.active = true
 		this.serverAvailable = true
 		this.unavailableUntil = 0
@@ -259,6 +304,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			return
 		}
 
+		this.lifecycleEpoch += 1
 		this.active = false
 		this.clearTimers()
 		this.bindApiListeners(false)
@@ -321,6 +367,12 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		const isPartial = shaped.message.partial === true
 		if (isPartial) {
 			this.pendingPartials.set(this.messageKey(shaped.taskId, shaped.message), shaped)
+			// Start the throttle window on the first partial without flushing so rapid
+			// updates to the same message coalesce to the latest text.
+			if (this.lastPartialFlushAt === 0) {
+				this.lastPartialFlushAt = this.now()
+				return
+			}
 			const elapsed = this.now() - this.lastPartialFlushAt
 			if (elapsed < PARTIAL_EVENT_MIN_INTERVAL_MS) {
 				return
@@ -362,7 +414,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private enqueueEvent(event: Omit<ZooRemoteEvent, "seq">): void {
-		if (!this.active) {
+		if (!this.active || this.eventSeqPersistFailed) {
 			return
 		}
 
@@ -395,8 +447,17 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			return
 		}
 
-		const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+		// Nickname only — never send an absolute disk path (home dir / username fingerprint).
+		// Split on both separators so Windows paths stay safe when unit tests run on Linux CI.
+		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+		const workspacePath = workspaceRoot
+			? workspaceRoot
+					.replace(/[/\\]+$/, "")
+					.split(/[/\\]/)
+					.pop() || undefined
+			: undefined
 		const taskId = this.provider.getCurrentTask()?.taskId
+		const epoch = this.lifecycleEpoch
 		const result = await this.client.postPresence({
 			instanceId: this.instanceId,
 			apiProvider: this.getApiProvider() ?? providerIdentifiers.zooGateway,
@@ -406,6 +467,16 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			editorName: vscode.env.appName,
 			extensionVersion: Package.version,
 		})
+
+		// Online publishes must still belong to the active lifecycle. Offline notify is allowed
+		// after deactivate (active=false) as long as a newer activation has not started.
+		if (online) {
+			if (!this.isLifecycleCurrent(epoch)) {
+				return
+			}
+		} else if (this.active && epoch !== this.lifecycleEpoch) {
+			return
+		}
 
 		if (result.status === 401 || result.status === 402 || result.status === 403) {
 			this.markNotEligibleBackoff()
@@ -465,10 +536,11 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async flushEvents(): Promise<void> {
-		if (!this.active || !this.canCallServer()) {
+		if (!this.active || this.eventSeqPersistFailed || !this.canCallServer()) {
 			return
 		}
 
+		const epoch = this.lifecycleEpoch
 		this.flushPendingPartials()
 		if (this.pendingEvents.length === 0) {
 			return
@@ -476,6 +548,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 		const batch = this.pendingEvents.splice(0, this.pendingEvents.length)
 		const result = await this.client.postEvents(this.instanceId, batch)
+		if (!this.isLifecycleCurrent(epoch)) {
+			return
+		}
 
 		if (result.status === 401 || result.status === 402 || result.status === 403) {
 			this.markNotEligibleBackoff()
@@ -498,7 +573,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async pollCommands(): Promise<void> {
-		if (!this.active || !this.canCallServer()) {
+		if (!this.active || this.disposed || this.commandPollInFlight || !this.canCallServer()) {
 			return
 		}
 
@@ -507,32 +582,51 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			return
 		}
 
-		const result = await this.client.getCommands(this.instanceId)
+		this.commandPollInFlight = true
+		const epoch = this.lifecycleEpoch
+		try {
+			const result = await this.client.getCommands(this.instanceId)
+			if (!this.isLifecycleCurrent(epoch)) {
+				return
+			}
 
-		if (result.status === 401 || result.status === 402 || result.status === 403) {
-			this.markNotEligibleBackoff()
-			await this.deactivate({ notifyOffline: false })
-			return
-		}
+			if (result.status === 401 || result.status === 402 || result.status === 403) {
+				this.markNotEligibleBackoff()
+				await this.deactivate({ notifyOffline: false })
+				return
+			}
 
-		if (result.status === 404) {
-			this.markUnavailable()
-			return
-		}
+			if (result.status === 404) {
+				this.markUnavailable()
+				return
+			}
 
-		if (!result.ok || !result.body) {
-			return
-		}
+			if (!result.ok || !result.body) {
+				return
+			}
 
-		this.serverAvailable = true
+			this.serverAvailable = true
 
-		for (const command of result.body.commands) {
-			await this.executeCommand(command)
+			for (const command of result.body.commands) {
+				if (!this.isLifecycleCurrent(epoch)) {
+					return
+				}
+				await this.executeCommand(command, epoch)
+			}
+		} finally {
+			this.commandPollInFlight = false
 		}
 	}
 
-	private async executeCommand(command: ZooRemoteCommand): Promise<void> {
+	private async executeCommand(command: ZooRemoteCommand, epoch: number): Promise<void> {
+		if (!this.isLifecycleCurrent(epoch)) {
+			return
+		}
+
 		if (!this.evaluateEligible()) {
+			if (!this.isLifecycleCurrent(epoch)) {
+				return
+			}
 			await this.client.ackCommand({
 				commandId: command.commandId,
 				status: "failed",
@@ -545,19 +639,31 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			switch (command.type) {
 				case "message":
 				case "answer_followup":
+					if (!this.isLifecycleCurrent(epoch)) {
+						return
+					}
 					await this.api.sendMessage(command.payload?.text, command.payload?.images)
 					if (command.payload?.mode) {
+						if (!this.isLifecycleCurrent(epoch)) {
+							return
+						}
 						await this.provider.handleModeSwitch(command.payload.mode as Mode)
 					}
 					break
 				case "approve_ask": {
 					const task = this.provider.getCurrentTask()
 					if (!task) {
+						if (!this.isLifecycleCurrent(epoch)) {
+							return
+						}
 						await this.client.ackCommand({
 							commandId: command.commandId,
 							status: "failed",
 							errorCode: "no_current_task",
 						})
+						return
+					}
+					if (!this.isLifecycleCurrent(epoch)) {
 						return
 					}
 					task.approveAsk({ text: command.payload?.text, images: command.payload?.images })
@@ -566,6 +672,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				case "deny_ask": {
 					const task = this.provider.getCurrentTask()
 					if (!task) {
+						if (!this.isLifecycleCurrent(epoch)) {
+							return
+						}
 						await this.client.ackCommand({
 							commandId: command.commandId,
 							status: "failed",
@@ -573,14 +682,23 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 						})
 						return
 					}
+					if (!this.isLifecycleCurrent(epoch)) {
+						return
+					}
 					task.denyAsk({ text: command.payload?.text, images: command.payload?.images })
 					break
 				}
 				case "cancel_task":
+					if (!this.isLifecycleCurrent(epoch)) {
+						return
+					}
 					await this.api.cancelCurrentTask()
 					break
 				case "resume_task":
 					if (!command.taskId) {
+						if (!this.isLifecycleCurrent(epoch)) {
+							return
+						}
 						await this.client.ackCommand({
 							commandId: command.commandId,
 							status: "failed",
@@ -588,9 +706,15 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 						})
 						return
 					}
+					if (!this.isLifecycleCurrent(epoch)) {
+						return
+					}
 					await this.api.resumeTask(command.taskId)
 					break
 				case "start_task":
+					if (!this.isLifecycleCurrent(epoch)) {
+						return
+					}
 					await this.api.startNewTask({
 						text: command.payload?.text,
 						images: command.payload?.images,
@@ -599,6 +723,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				case "switch_mode": {
 					const mode = command.payload?.mode
 					if (!mode) {
+						if (!this.isLifecycleCurrent(epoch)) {
+							return
+						}
 						await this.client.ackCommand({
 							commandId: command.commandId,
 							status: "failed",
@@ -606,11 +733,17 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 						})
 						return
 					}
+					if (!this.isLifecycleCurrent(epoch)) {
+						return
+					}
 					await this.provider.handleModeSwitch(mode as Mode)
 					break
 				}
 				default: {
 					const _exhaustive: never = command.type
+					if (!this.isLifecycleCurrent(epoch)) {
+						return
+					}
 					await this.client.ackCommand({
 						commandId: command.commandId,
 						status: "failed",
@@ -621,9 +754,15 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				}
 			}
 
+			if (!this.isLifecycleCurrent(epoch)) {
+				return
+			}
 			// Ack 404 (command_not_found) must not mark the bridge unavailable.
 			await this.client.ackCommand({ commandId: command.commandId, status: "acked" })
 		} catch (error) {
+			if (!this.isLifecycleCurrent(epoch)) {
+				return
+			}
 			await this.client.ackCommand({
 				commandId: command.commandId,
 				status: "failed",

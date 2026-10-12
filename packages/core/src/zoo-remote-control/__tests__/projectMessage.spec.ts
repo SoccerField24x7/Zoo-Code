@@ -92,6 +92,39 @@ describe("projectClineMessageForRemote", () => {
 		).toContain("[truncated")
 	})
 
+	it("recursively truncates nested tool JSON strings beyond top-level keys", () => {
+		const huge = "n".repeat(REMOTE_MESSAGE_TEXT_MAX_CHARS + 80)
+		const shaped = projectClineMessageForRemote({
+			ts: 1,
+			type: "ask",
+			ask: "tool",
+			text: JSON.stringify({
+				tool: "updateTodoList",
+				path: "src/a.ts",
+				meta: {
+					summary: huge,
+					nested: { note: huge, keep: "ok" },
+				},
+				todos: [
+					{ id: "1", content: huge },
+					{ id: "2", content: "short" },
+				],
+			}),
+		})
+		const parsed = JSON.parse(shaped.text!) as {
+			path: string
+			meta: { summary: string; nested: { note: string; keep: string } }
+			todos: Array<{ id: string; content: string }>
+		}
+		expect(parsed.path).toBe("src/a.ts")
+		expect(parsed.meta.nested.keep).toBe("ok")
+		expect(parsed.meta.summary).toContain("[truncated")
+		expect(parsed.meta.nested.note).toContain("[truncated")
+		expect(parsed.todos[0]?.content).toContain("[truncated")
+		expect(parsed.todos[1]?.content).toBe("short")
+		expect(parsed.meta.summary.length).toBeLessThanOrEqual(REMOTE_MESSAGE_TEXT_MAX_CHARS + 40)
+	})
+
 	it("shapes batchDiffs entries and leaves non-object batch entries untouched", () => {
 		const huge = "d".repeat(REMOTE_MESSAGE_TEXT_MAX_CHARS + 10)
 		const shaped = projectClineMessageForRemote({

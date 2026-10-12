@@ -105,6 +105,32 @@ describe("ZooRemoteControlClient", () => {
 		)
 	})
 
+	it("returns status 0 when getCommands JSON body is malformed", async () => {
+		fetchFn.mockResolvedValue({
+			ok: true,
+			status: 200,
+			json: async () => {
+				throw new SyntaxError("Unexpected token")
+			},
+		})
+		const result = await client.getCommands("inst-1")
+		expect(result).toEqual({ ok: false, status: 0 })
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("Unexpected token"))
+	})
+
+	it("returns status 0 when getCommands body fails schema validation", async () => {
+		fetchFn.mockResolvedValue({
+			ok: true,
+			status: 200,
+			json: async () => ({
+				commands: [{ commandId: "c1", type: "not_a_real_command" }],
+			}),
+		})
+		const result = await client.getCommands("inst-1")
+		expect(result).toEqual({ ok: false, status: 0 })
+		expect(log).toHaveBeenCalled()
+	})
+
 	it("acks commands", async () => {
 		fetchFn.mockResolvedValue({ ok: true, status: 200 })
 		await client.ackCommand({ commandId: "c1", status: "acked" })

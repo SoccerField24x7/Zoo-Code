@@ -5,6 +5,8 @@ export const REMOTE_MESSAGE_TEXT_MAX_CHARS = 48_000
 export const REMOTE_MESSAGE_IMAGE_MAX_COUNT = 2
 export const REMOTE_MESSAGE_IMAGE_MAX_CHARS = 8_000
 export const REMOTE_SNAPSHOT_MAX_MESSAGES = 80
+/** Cap nested arrays (e.g. batchDiffs) so snapshots stay bounded. */
+export const REMOTE_MESSAGE_ARRAY_MAX_ITEMS = 20
 
 function truncateString(value: string, max: number): string {
 	if (value.length <= max) {
@@ -13,38 +15,34 @@ function truncateString(value: string, max: number): string {
 	return `${value.slice(0, max)}\n…[truncated ${value.length - max} chars]`
 }
 
+function boundJsonValue(value: unknown): unknown {
+	if (typeof value === "string") {
+		return truncateString(value, REMOTE_MESSAGE_TEXT_MAX_CHARS)
+	}
+
+	if (Array.isArray(value)) {
+		return value.slice(0, REMOTE_MESSAGE_ARRAY_MAX_ITEMS).map((entry) => boundJsonValue(entry))
+	}
+
+	if (value && typeof value === "object") {
+		const record: Record<string, unknown> = {}
+		for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+			record[key] = boundJsonValue(child)
+		}
+		return record
+	}
+
+	return value
+}
+
 function shapeToolText(text: string): string {
 	try {
 		const parsed: unknown = JSON.parse(text)
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+		if (parsed === null || typeof parsed !== "object") {
 			return truncateString(text, REMOTE_MESSAGE_TEXT_MAX_CHARS)
 		}
 
-		const record = { ...(parsed as Record<string, unknown>) }
-		for (const key of ["content", "diff", "originalContent", "code", "result"] as const) {
-			const value = record[key]
-			if (typeof value === "string") {
-				record[key] = truncateString(value, REMOTE_MESSAGE_TEXT_MAX_CHARS)
-			}
-		}
-
-		if (Array.isArray(record.batchDiffs)) {
-			record.batchDiffs = record.batchDiffs.slice(0, 20).map((entry) => {
-				if (!entry || typeof entry !== "object") {
-					return entry
-				}
-				const item = { ...(entry as Record<string, unknown>) }
-				if (typeof item.diff === "string") {
-					item.diff = truncateString(item.diff, REMOTE_MESSAGE_TEXT_MAX_CHARS)
-				}
-				if (typeof item.content === "string") {
-					item.content = truncateString(item.content, REMOTE_MESSAGE_TEXT_MAX_CHARS)
-				}
-				return item
-			})
-		}
-
-		return JSON.stringify(record)
+		return JSON.stringify(boundJsonValue(parsed))
 	} catch {
 		return truncateString(text, REMOTE_MESSAGE_TEXT_MAX_CHARS)
 	}
