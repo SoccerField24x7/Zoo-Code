@@ -1928,6 +1928,26 @@ describe("PR review-state workflow", () => {
 			expect(latestGateStatus(result)?.state).toBe("pending")
 		})
 
+		it("names the blocking maintainer in the guide", async () => {
+			const result = await runWorkflow({
+				labels: ["awaiting-author"],
+				permissions: { maintainer: "write" },
+				reviews: [coderabbitApproval, staleMaintainerChangeRequest],
+			})
+
+			expect(latestGuide(result)).toContain("Blocking maintainer: @maintainer.")
+			expect(latestGuide(result)).toContain("New commits do not clear the block.")
+		})
+
+		it("does not name a blocker when the maintainer is not blocking", async () => {
+			const result = await runWorkflow({
+				permissions: { maintainer: "write" },
+				reviews: [coderabbitApproval],
+			})
+
+			expect(latestGuide(result)).not.toContain("Blocking maintainer")
+		})
+
 		it("keeps the blocker after a base-only merge", async () => {
 			const result = await runWorkflow({
 				eventName: "push",

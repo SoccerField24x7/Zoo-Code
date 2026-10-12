@@ -460,7 +460,7 @@ jobs:
                         }
                       }
 
-                      function reviewGuideBody(pr, phase, activationPending = false) {
+                      function reviewGuideBody(pr, phase, activationPending = false, blockers = []) {
                         const automatedAuthor = pr.user?.type === 'Bot';
                         const authorNote = automatedAuthor
                           ? 'This PR was opened by an automated account. A human maintainer must verify the change intent, provenance, and validation before merging.'
@@ -476,7 +476,10 @@ jobs:
                             ? '\n\nIf automated review does not start, a maintainer must restart it.'
                             : phase === 'maintainer' && !automatedAuthor
                               ? '\n\nAutomated review is complete for the latest commit but does not replace human approval.'
-                              : '';
+                              : phase === 'maintainer-changes' && blockers.length > 0
+                                ? `\n\nBlocking maintainer: ${blockers.join(', ')}. New commits do not clear the block. ` +
+                                  'The PR author must re-request review from each blocking maintainer.'
+                                : '';
 
                         return `${guideMarker}\n### Review status\n\n${authorNote}\n\n` +
                           `**Current step:** ${phaseMessage(phase)}${phaseHelp}\n\n` +
@@ -487,13 +490,13 @@ jobs:
                           labelMarker;
                       }
 
-                      async function updateReviewGuide(pr, phase, existingGuide = null, activationPending = false) {
+                      async function updateReviewGuide(pr, phase, existingGuide = null, activationPending = false, blockers = []) {
                         if (isReadOnlyRun && isForkPR(pr)) {
                           core.info(`PR #${pr.number}: fork PR on a read-only run — skipping guide update`);
                           return;
                         }
 
-                        const body = reviewGuideBody(pr, phase, activationPending);
+                        const body = reviewGuideBody(pr, phase, activationPending, blockers);
                         const existing = existingGuide ?? await findReviewGuide(pr);
 
                         if (!existing) {
@@ -960,6 +963,7 @@ jobs:
                           if (!readyForMaintainer) {
                             await updateReviewGate(pr, phase, false);
                           }
+                          const blockerLogins = [...maintainerBlockers.values()].map(review => `@${review.user.login}`);
                           const recyclingActiveLabel = activateCodeRabbit && recycleCodeRabbitLabel &&
                             pr.labels.some(label => label.name === codeRabbitActiveLabel);
                           existingGuide = await updateReviewGuide(
@@ -967,10 +971,11 @@ jobs:
                             phase,
                             existingGuide,
                             recyclingActiveLabel,
+                            blockerLogins,
                           );
                           await setCodeRabbitReviewActive(pr, activateCodeRabbit, recycleCodeRabbitLabel);
                           if (recyclingActiveLabel) {
-                            await updateReviewGuide(pr, phase, existingGuide);
+                            await updateReviewGuide(pr, phase, existingGuide, false, blockerLogins);
                           }
                           await reconcileLabels(pr, desiredLabel);
                           await reconcileCommunityApproval(pr, communityDecision);
