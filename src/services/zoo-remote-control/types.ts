@@ -14,6 +14,8 @@ export const zooRemoteCommandTypeSchema = z.enum([
 	"cancel_task",
 	"resume_task",
 	"start_task",
+	"switch_mode",
+	"answer_followup",
 ])
 
 export type ZooRemoteCommandType = z.infer<typeof zooRemoteCommandTypeSchema>
@@ -26,6 +28,7 @@ export const zooRemoteCommandSchema = z.object({
 		.object({
 			text: z.string().optional(),
 			images: z.array(z.string()).optional(),
+			mode: z.string().optional(),
 		})
 		.optional(),
 	timestamp: z.number().optional(),
@@ -51,10 +54,13 @@ export const zooRemoteEventTypeSchema = z.enum([
 
 export type ZooRemoteEventType = z.infer<typeof zooRemoteEventTypeSchema>
 
+export const zooRemoteMessageActionSchema = z.enum(["created", "updated"])
+
 export const zooRemoteEventSchema = z.object({
 	type: zooRemoteEventTypeSchema,
 	taskId: z.string().min(1),
 	message: clineMessageSchema.optional(),
+	action: zooRemoteMessageActionSchema.optional(),
 	mode: z.string().optional(),
 	seq: z.number().int().nonnegative().optional(),
 	timestamp: z.number(),
@@ -82,3 +88,12 @@ export const zooRemoteCommandAckSchema = z.object({
 })
 
 export type ZooRemoteCommandAck = z.infer<typeof zooRemoteCommandAckSchema>
+
+export const zooRemoteSnapshotSchema = z.object({
+	instanceId: z.string().min(1),
+	taskId: z.string().min(1),
+	messages: z.array(clineMessageSchema).max(500),
+	mode: z.string().optional(),
+})
+
+export type ZooRemoteSnapshot = z.infer<typeof zooRemoteSnapshotSchema>

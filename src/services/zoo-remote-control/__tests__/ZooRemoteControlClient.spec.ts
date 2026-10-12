@@ -70,6 +70,24 @@ describe("ZooRemoteControlClient", () => {
 		)
 	})
 
+	it("posts snapshots", async () => {
+		fetchFn.mockResolvedValue({ ok: true, status: 200 })
+		const snapshot = {
+			instanceId: "inst-1",
+			taskId: "t1",
+			messages: [{ ts: 1, type: "say" as const, say: "text" as const, text: "hi" }],
+			mode: "code",
+		}
+		await client.postSnapshot(snapshot)
+		expect(fetchFn).toHaveBeenCalledWith(
+			"https://www.zoocode.dev/api/extension/remote/snapshot",
+			expect.objectContaining({
+				method: "POST",
+				body: JSON.stringify(snapshot),
+			}),
+		)
+	})
+
 	it("parses command list responses", async () => {
 		fetchFn.mockResolvedValue({
 			ok: true,

@@ -9,9 +9,11 @@ import {
 } from "@roo-code/types"
 
 import type { ClineProvider } from "../../core/webview/ClineProvider"
+import type { Mode } from "../../shared/modes"
 import { Package } from "../../shared/package"
 import { getCachedZooCodeToken, getZooCodeBaseUrl } from "../zoo-code-auth"
 import { isZooRemoteControlEligible } from "./eligibility"
+import { projectClineMessageForRemote, projectClineMessagesForSnapshot } from "./projectMessage"
 import { ZooRemoteControlClient } from "./ZooRemoteControlClient"
 import type { ZooRemoteCommand, ZooRemoteEvent } from "./types"
 
@@ -20,7 +22,9 @@ const COMMAND_POLL_INTERVAL_MS = 2_000
 const EVENT_FLUSH_INTERVAL_MS = 100
 const PARTIAL_EVENT_MIN_INTERVAL_MS = 75
 const UNAVAILABLE_BACKOFF_MS = 60_000
+const NOT_ELIGIBLE_BACKOFF_MS = 30_000
 const INSTANCE_ID_STATE_KEY = "zooRemoteControl.instanceId"
+const EVENT_SEQ_STATE_KEY = "zooRemoteControl.eventSeq"
 
 export type ZooRemoteControlBridgeDeps = {
 	api: Pick<RooCodeAPI, "on" | "off" | "sendMessage" | "cancelCurrentTask" | "resumeTask" | "startNewTask">
@@ -45,9 +49,10 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	private active = false
 	private serverAvailable = true
 	private unavailableUntil = 0
-	private eventSeq = 0
+	private eventSeq: number
 	private pendingEvents: ZooRemoteEvent[] = []
 	private lastPartialFlushAt = 0
+	private pendingPartials = new Map<string, { taskId: string; action?: string; message: ClineMessage }>()
 
 	private presenceTimer: ReturnType<typeof setInterval> | undefined
 	private commandTimer: ReturnType<typeof setInterval> | undefined
@@ -93,6 +98,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		this.log = deps.log ?? (() => {})
 		this.now = deps.now ?? (() => Date.now())
 		this.instanceId = this.resolveInstanceId()
+		this.eventSeq = this.resolveEventSeq()
 		this.client =
 			deps.client ??
 			new ZooRemoteControlClient({
@@ -165,6 +171,15 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		return generated
 	}
 
+	private resolveEventSeq(): number {
+		const existing = this.context.globalState.get<number>(EVENT_SEQ_STATE_KEY)
+		return typeof existing === "number" && Number.isFinite(existing) && existing >= 0 ? existing : 0
+	}
+
+	private persistEventSeq(): void {
+		void this.context.globalState.update(EVENT_SEQ_STATE_KEY, this.eventSeq)
+	}
+
 	private isSettingEnabled(): boolean {
 		return vscode.workspace.getConfiguration(Package.name).get<boolean>("remoteControl.enabled", false) === true
 	}
@@ -230,6 +245,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 		this.log("[ZooRemoteControl] enabled")
 		await this.publishPresence(true)
+		await this.publishSnapshot()
 	}
 
 	private async deactivate({ notifyOffline }: { notifyOffline: boolean }): Promise<void> {
@@ -243,17 +259,14 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		this.clearTimers()
 		this.bindApiListeners(false)
 		this.pendingEvents = []
+		this.pendingPartials.clear()
 
-		if (notifyOffline && this.evaluateEligibleForOfflineNotify()) {
-			await this.publishPresence(false)
+		if (notifyOffline) {
+			// Always try offline presence while a session token remains (even if provider changed).
+			await this.publishPresence(false, { force: true })
 		}
 
 		this.log("[ZooRemoteControl] disabled")
-	}
-
-	private evaluateEligibleForOfflineNotify(): boolean {
-		// Only notify offline while a Zoo session can still authenticate the call.
-		return Boolean(getCachedZooCodeToken()) && this.getApiProvider() === providerIdentifiers.zooGateway
 	}
 
 	private clearTimers(): void {
@@ -282,6 +295,10 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		this.api[method](RooCodeEventName.TaskModeSwitched, this.onModeSwitched)
 	}
 
+	private messageKey(taskId: string, message: ClineMessage): string {
+		return message.messageId ?? `${taskId}:${message.ts}`
+	}
+
 	private async handleMessageEvent(payload: {
 		taskId: string
 		action?: string
@@ -291,19 +308,51 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			return
 		}
 
-		const isPartial = payload.message.partial === true
+		const shaped = {
+			taskId: payload.taskId,
+			action: payload.action,
+			message: projectClineMessageForRemote(payload.message),
+		}
+
+		const isPartial = shaped.message.partial === true
 		if (isPartial) {
+			this.pendingPartials.set(this.messageKey(shaped.taskId, shaped.message), shaped)
 			const elapsed = this.now() - this.lastPartialFlushAt
 			if (elapsed < PARTIAL_EVENT_MIN_INTERVAL_MS) {
 				return
 			}
-			this.lastPartialFlushAt = this.now()
+			this.flushPendingPartials()
+			return
 		}
+
+		this.pendingPartials.delete(this.messageKey(shaped.taskId, shaped.message))
+		this.enqueueMessageEvent(shaped)
+	}
+
+	private flushPendingPartials(): void {
+		if (this.pendingPartials.size === 0) {
+			return
+		}
+		this.lastPartialFlushAt = this.now()
+		for (const shaped of this.pendingPartials.values()) {
+			this.enqueueMessageEvent(shaped)
+		}
+		this.pendingPartials.clear()
+	}
+
+	private enqueueMessageEvent(shaped: { taskId: string; action?: string; message: ClineMessage }): void {
+		const action =
+			shaped.action === "created" || shaped.action === "updated"
+				? shaped.action
+				: shaped.message.partial
+					? "updated"
+					: "created"
 
 		this.enqueueEvent({
 			type: "message",
-			taskId: payload.taskId,
-			message: payload.message,
+			taskId: shaped.taskId,
+			action,
+			message: shaped.message,
 			timestamp: this.now(),
 		})
 	}
@@ -314,6 +363,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		}
 
 		this.pendingEvents.push({ ...event, seq: this.eventSeq++ })
+		this.persistEventSeq()
 	}
 
 	private markUnavailable(): void {
@@ -321,18 +371,23 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		this.unavailableUntil = this.now() + UNAVAILABLE_BACKOFF_MS
 	}
 
+	private markNotEligibleBackoff(): void {
+		this.serverAvailable = false
+		this.unavailableUntil = this.now() + NOT_ELIGIBLE_BACKOFF_MS
+	}
+
 	private canCallServer(): boolean {
-		if (!this.active) {
-			return false
-		}
 		if (this.serverAvailable) {
 			return true
 		}
 		return this.now() >= this.unavailableUntil
 	}
 
-	private async publishPresence(online: boolean): Promise<void> {
-		if (!this.canCallServer() && online) {
+	private async publishPresence(online: boolean, options?: { force?: boolean }): Promise<void> {
+		if (!options?.force && !this.canCallServer() && online) {
+			return
+		}
+		if (!getCachedZooCodeToken()) {
 			return
 		}
 
@@ -348,6 +403,53 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			extensionVersion: Package.version,
 		})
 
+		if (result.status === 401 || result.status === 402 || result.status === 403) {
+			this.markNotEligibleBackoff()
+			if (this.active) {
+				await this.deactivate({ notifyOffline: false })
+			}
+			return
+		}
+
+		if (result.status === 404) {
+			this.markUnavailable()
+			return
+		}
+
+		if (result.ok) {
+			this.serverAvailable = true
+		}
+	}
+
+	private async publishSnapshot(): Promise<void> {
+		if (!this.active || !this.canCallServer()) {
+			return
+		}
+
+		const task = this.provider.getCurrentTask()
+		if (!task?.taskId || !Array.isArray(task.clineMessages)) {
+			return
+		}
+
+		let mode: string | undefined
+		try {
+			mode = task.taskMode
+		} catch {
+			mode = undefined
+		}
+
+		const result = await this.client.postSnapshot({
+			instanceId: this.instanceId,
+			taskId: task.taskId,
+			messages: projectClineMessagesForSnapshot(task.clineMessages),
+			mode,
+		})
+
+		if (result.status === 401 || result.status === 402 || result.status === 403) {
+			this.markNotEligibleBackoff()
+			return
+		}
+
 		if (result.status === 404) {
 			this.markUnavailable()
 			return
@@ -359,12 +461,23 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async flushEvents(): Promise<void> {
-		if (!this.active || this.pendingEvents.length === 0 || !this.canCallServer()) {
+		if (!this.active || !this.canCallServer()) {
+			return
+		}
+
+		this.flushPendingPartials()
+		if (this.pendingEvents.length === 0) {
 			return
 		}
 
 		const batch = this.pendingEvents.splice(0, this.pendingEvents.length)
 		const result = await this.client.postEvents(this.instanceId, batch)
+
+		if (result.status === 401 || result.status === 402 || result.status === 403) {
+			this.markNotEligibleBackoff()
+			this.pendingEvents = [...batch.slice(-50), ...this.pendingEvents].slice(0, 200)
+			return
+		}
 
 		if (result.status === 404) {
 			this.markUnavailable()
@@ -373,7 +486,6 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		}
 
 		if (!result.ok) {
-			// Re-queue failed non-404 batches at the front (bounded).
 			this.pendingEvents = [...batch.slice(-50), ...this.pendingEvents].slice(0, 200)
 			return
 		}
@@ -392,6 +504,12 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		}
 
 		const result = await this.client.getCommands(this.instanceId)
+
+		if (result.status === 401 || result.status === 402 || result.status === 403) {
+			this.markNotEligibleBackoff()
+			await this.deactivate({ notifyOffline: false })
+			return
+		}
 
 		if (result.status === 404) {
 			this.markUnavailable()
@@ -422,7 +540,11 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		try {
 			switch (command.type) {
 				case "message":
+				case "answer_followup":
 					await this.api.sendMessage(command.payload?.text, command.payload?.images)
+					if (command.payload?.mode) {
+						await this.provider.handleModeSwitch(command.payload.mode as Mode)
+					}
 					break
 				case "approve_ask": {
 					const task = this.provider.getCurrentTask()
@@ -470,6 +592,19 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 						images: command.payload?.images,
 					})
 					break
+				case "switch_mode": {
+					const mode = command.payload?.mode
+					if (!mode) {
+						await this.client.ackCommand({
+							commandId: command.commandId,
+							status: "failed",
+							errorCode: "missing_mode",
+						})
+						return
+					}
+					await this.provider.handleModeSwitch(mode as Mode)
+					break
+				}
 				default: {
 					const _exhaustive: never = command.type
 					await this.client.ackCommand({
@@ -482,6 +617,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				}
 			}
 
+			// Ack 404 (command_not_found) must not mark the bridge unavailable.
 			await this.client.ackCommand({ commandId: command.commandId, status: "acked" })
 		} catch (error) {
 			await this.client.ackCommand({

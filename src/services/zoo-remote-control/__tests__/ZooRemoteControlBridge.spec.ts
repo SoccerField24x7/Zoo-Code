@@ -38,10 +38,12 @@ describe("ZooRemoteControlBridge", () => {
 	let provider: EventEmitter & {
 		contextProxy: { getProviderSettings: ReturnType<typeof vi.fn> }
 		getCurrentTask: ReturnType<typeof vi.fn>
+		handleModeSwitch: ReturnType<typeof vi.fn>
 	}
 	let client: {
 		postPresence: ReturnType<typeof vi.fn>
 		postEvents: ReturnType<typeof vi.fn>
+		postSnapshot: ReturnType<typeof vi.fn>
 		getCommands: ReturnType<typeof vi.fn>
 		ackCommand: ReturnType<typeof vi.fn>
 	}
@@ -74,18 +76,24 @@ describe("ZooRemoteControlBridge", () => {
 				getProviderSettings: vi.fn(() => ({ apiProvider: providerIdentifiers.openrouter })),
 			},
 			getCurrentTask: vi.fn(() => undefined),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
 		})
 
 		client = {
 			postPresence: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
 			postEvents: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+			postSnapshot: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
 			getCommands: vi.fn().mockResolvedValue({ ok: true, status: 200, body: { commands: [] } }),
 			ackCommand: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
 		}
 
 		context = {
 			globalState: {
-				get: vi.fn(() => "instance-1"),
+				get: vi.fn((key: string) => {
+					if (key === "zooRemoteControl.instanceId") return "instance-1"
+					if (key === "zooRemoteControl.eventSeq") return 0
+					return undefined
+				}),
 				update: vi.fn().mockResolvedValue(undefined),
 			},
 			secrets: {
@@ -344,7 +352,8 @@ describe("ZooRemoteControlBridge", () => {
 		bridge.dispose()
 	})
 
-	it("cancels, resumes, and starts tasks from remote commands", async () => {
+	it("cancels, resumes, starts, and switches mode from remote commands", async () => {
+		provider.handleModeSwitch = vi.fn().mockResolvedValue(undefined)
 		client.getCommands.mockResolvedValueOnce({
 			ok: true,
 			status: 200,
@@ -353,6 +362,7 @@ describe("ZooRemoteControlBridge", () => {
 					{ commandId: "c1", type: "cancel_task" },
 					{ commandId: "r1", type: "resume_task", taskId: "task-9" },
 					{ commandId: "s1", type: "start_task", payload: { text: "new work" } },
+					{ commandId: "m1", type: "switch_mode", payload: { mode: "code" } },
 				],
 			},
 		})
@@ -363,9 +373,11 @@ describe("ZooRemoteControlBridge", () => {
 		expect(api.cancelCurrentTask).toHaveBeenCalled()
 		expect(api.resumeTask).toHaveBeenCalledWith("task-9")
 		expect(api.startNewTask).toHaveBeenCalledWith({ text: "new work", images: undefined })
+		expect(provider.handleModeSwitch).toHaveBeenCalledWith("code")
 		expect(client.ackCommand).toHaveBeenCalledWith({ commandId: "c1", status: "acked" })
 		expect(client.ackCommand).toHaveBeenCalledWith({ commandId: "r1", status: "acked" })
 		expect(client.ackCommand).toHaveBeenCalledWith({ commandId: "s1", status: "acked" })
+		expect(client.ackCommand).toHaveBeenCalledWith({ commandId: "m1", status: "acked" })
 		bridge.dispose()
 	})
 

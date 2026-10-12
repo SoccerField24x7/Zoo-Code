@@ -1,10 +1,10 @@
 import {
-	zooRemoteCommandAckSchema,
 	zooRemoteCommandsResponseSchema,
 	type ZooRemoteCommandAck,
 	type ZooRemoteCommandsResponse,
 	type ZooRemoteEvent,
 	type ZooRemotePresence,
+	type ZooRemoteSnapshot,
 } from "./types"
 
 export type ZooRemoteControlClientOptions = {
@@ -16,7 +16,8 @@ export type ZooRemoteControlClientOptions = {
 
 /**
  * Thin HTTP client for /api/extension/remote/* using the Zoo session token.
- * Callers treat 404 as "server not ready" and back off.
+ * Callers treat route-missing 404 as "server not ready" and back off.
+ * Ack 404 (command_not_found) must not use the same backoff path.
  */
 export class ZooRemoteControlClient {
 	private readonly getBaseUrl: () => string
@@ -37,6 +38,10 @@ export class ZooRemoteControlClient {
 
 	async postEvents(instanceId: string, events: ZooRemoteEvent[]): Promise<{ ok: boolean; status: number }> {
 		return this.request("POST", "/api/extension/remote/events", { instanceId, events })
+	}
+
+	async postSnapshot(snapshot: ZooRemoteSnapshot): Promise<{ ok: boolean; status: number }> {
+		return this.request("POST", "/api/extension/remote/snapshot", snapshot)
 	}
 
 	async getCommands(instanceId: string): Promise<{
