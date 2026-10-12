@@ -22,6 +22,8 @@
 		"goToSubtask": "Go to subtask",
 		"steerRemotely": "Steer this task remotely",
 		"steerRemotelyHint": "Mirror this task to the Zoo dashboard so you can approve, reply, and continue from there.",
+		"steerRemotelyNeedsGateway": "Switch this profile to Zoo Gateway before you can steer the task remotely.",
+		"steerRemotelyOpenSettings": "Open settings",
 		"steerRemotelyActive": "Remote steer is on — control this task from the Zoo dashboard.",
 		"openRemoteDashboard": "Open dashboard"
 	},

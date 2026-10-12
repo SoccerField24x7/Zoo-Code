@@ -1,6 +1,7 @@
 import * as vscode from "vscode"
 
 import {
+	executeRemoteCommand,
 	isZooRemoteControlEligible,
 	projectClineMessageForRemote,
 	projectClineMessagesForSnapshot,
@@ -17,7 +18,6 @@ import {
 } from "@roo-code/types"
 
 import type { ClineProvider } from "../../core/webview/ClineProvider"
-import type { Mode } from "../../shared/modes"
 import { Package } from "../../shared/package"
 import { getCachedZooCodeToken, getZooCodeBaseUrl } from "../zoo-code-auth"
 
@@ -619,156 +619,20 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async executeCommand(command: ZooRemoteCommand, epoch: number): Promise<void> {
-		if (!this.isLifecycleCurrent(epoch)) {
-			return
-		}
-
-		if (!this.evaluateEligible()) {
-			if (!this.isLifecycleCurrent(epoch)) {
-				return
-			}
-			await this.client.ackCommand({
-				commandId: command.commandId,
-				status: "failed",
-				errorCode: "not_eligible",
-			})
-			return
-		}
-
-		try {
-			switch (command.type) {
-				case "message":
-				case "answer_followup":
-					if (!this.isLifecycleCurrent(epoch)) {
-						return
-					}
-					await this.api.sendMessage(command.payload?.text, command.payload?.images)
-					if (command.payload?.mode) {
-						if (!this.isLifecycleCurrent(epoch)) {
-							return
-						}
-						await this.provider.handleModeSwitch(command.payload.mode as Mode)
-					}
-					break
-				case "approve_ask": {
-					const task = this.provider.getCurrentTask()
-					if (!task) {
-						if (!this.isLifecycleCurrent(epoch)) {
-							return
-						}
-						await this.client.ackCommand({
-							commandId: command.commandId,
-							status: "failed",
-							errorCode: "no_current_task",
-						})
-						return
-					}
-					if (!this.isLifecycleCurrent(epoch)) {
-						return
-					}
-					task.approveAsk({ text: command.payload?.text, images: command.payload?.images })
-					break
-				}
-				case "deny_ask": {
-					const task = this.provider.getCurrentTask()
-					if (!task) {
-						if (!this.isLifecycleCurrent(epoch)) {
-							return
-						}
-						await this.client.ackCommand({
-							commandId: command.commandId,
-							status: "failed",
-							errorCode: "no_current_task",
-						})
-						return
-					}
-					if (!this.isLifecycleCurrent(epoch)) {
-						return
-					}
-					task.denyAsk({ text: command.payload?.text, images: command.payload?.images })
-					break
-				}
-				case "cancel_task":
-					if (!this.isLifecycleCurrent(epoch)) {
-						return
-					}
-					await this.api.cancelCurrentTask()
-					break
-				case "resume_task":
-					if (!command.taskId) {
-						if (!this.isLifecycleCurrent(epoch)) {
-							return
-						}
-						await this.client.ackCommand({
-							commandId: command.commandId,
-							status: "failed",
-							errorCode: "missing_task_id",
-						})
-						return
-					}
-					if (!this.isLifecycleCurrent(epoch)) {
-						return
-					}
-					await this.api.resumeTask(command.taskId)
-					break
-				case "start_task":
-					if (!this.isLifecycleCurrent(epoch)) {
-						return
-					}
-					await this.api.startNewTask({
-						text: command.payload?.text,
-						images: command.payload?.images,
-					})
-					break
-				case "switch_mode": {
-					const mode = command.payload?.mode
-					if (!mode) {
-						if (!this.isLifecycleCurrent(epoch)) {
-							return
-						}
-						await this.client.ackCommand({
-							commandId: command.commandId,
-							status: "failed",
-							errorCode: "missing_mode",
-						})
-						return
-					}
-					if (!this.isLifecycleCurrent(epoch)) {
-						return
-					}
-					await this.provider.handleModeSwitch(mode as Mode)
-					break
-				}
-				default: {
-					const _exhaustive: never = command.type
-					if (!this.isLifecycleCurrent(epoch)) {
-						return
-					}
-					await this.client.ackCommand({
-						commandId: command.commandId,
-						status: "failed",
-						errorCode: "unknown_command",
-						message: String(_exhaustive),
-					})
-					return
-				}
-			}
-
-			if (!this.isLifecycleCurrent(epoch)) {
-				return
-			}
-			// Ack 404 (command_not_found) must not mark the bridge unavailable.
-			await this.client.ackCommand({ commandId: command.commandId, status: "acked" })
-		} catch (error) {
-			if (!this.isLifecycleCurrent(epoch)) {
-				return
-			}
-			await this.client.ackCommand({
-				commandId: command.commandId,
-				status: "failed",
-				errorCode: "execution_failed",
-				message: error instanceof Error ? error.message : String(error),
-			})
-		}
+		await executeRemoteCommand({
+			command,
+			epoch,
+			client: this.client,
+			host: {
+				isLifecycleCurrent: (value) => this.isLifecycleCurrent(value),
+				isEligible: () => this.evaluateEligible(),
+				sendMessage: (text, images) => this.api.sendMessage(text, images),
+				handleModeSwitch: (mode) => this.provider.handleModeSwitch(mode as never),
+				getCurrentTask: () => this.provider.getCurrentTask() as never,
+				cancelCurrentTask: () => this.api.cancelCurrentTask(),
+				resumeTask: (taskId) => this.api.resumeTask(taskId),
+				startNewTask: (payload) => this.api.startNewTask(payload),
+			},
+		})
 	}
 }

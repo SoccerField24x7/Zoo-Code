@@ -375,6 +375,7 @@ describe("TaskHeader", () => {
 		})
 
 		it("shows an immediate manual control to enable remote steer, including on completed tasks", () => {
+			mockExtensionState.zooCodeBaseUrl = "https://www.zoocode.dev"
 			renderTaskHeader()
 			const offer = screen.getByTestId("remote-steer-offer")
 			expect(offer).toHaveTextContent("chat:task.steerRemotelyHint")
@@ -383,6 +384,10 @@ describe("TaskHeader", () => {
 				type: "updateVSCodeSetting",
 				setting: "zoo-code.remoteControl.enabled",
 				bool: true,
+			})
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "openExternal",
+				url: "https://www.zoocode.dev/dashboard/agents/ide",
 			})
 		})
 
@@ -397,6 +402,21 @@ describe("TaskHeader", () => {
 				type: "openExternal",
 				url: "https://www.zoocode.dev/dashboard/agents/ide",
 			})
+		})
+
+		it("prompts to switch to Zoo Gateway when the active profile is not eligible", () => {
+			mockExtensionState.apiConfiguration = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "test-api-key",
+				apiModelId: "claude-3-opus-20240229",
+			} as ProviderSettings
+			renderTaskHeader()
+
+			expect(screen.getByTestId("remote-steer-needs-gateway")).toHaveTextContent(
+				"chat:task.steerRemotelyNeedsGateway",
+			)
+			fireEvent.click(screen.getByRole("button", { name: "chat:task.steerRemotelyOpenSettings" }))
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "switchTab", tab: "settings" })
 		})
 	})
 })
