@@ -90,13 +90,13 @@ const TaskHeader = ({
 		vscode.postMessage({ type: "switchTab", tab: "settings" })
 	}
 
-	const enableRemoteSteerAndOpenDashboard = () => {
-		vscode.postMessage({
-			type: "updateVSCodeSetting",
-			setting: "zoo-code.remoteControl.enabled",
-			bool: true,
-		})
+	const startRemoteSessionAndOpenDashboard = () => {
+		vscode.postMessage({ type: "startRemoteControlSession" })
 		openRemoteDashboard()
+	}
+
+	const endRemoteSession = () => {
+		vscode.postMessage({ type: "endRemoteControlSession" })
 	}
 
 	// Calculate maxTokens (reserved for output) once for reuse in percentage and tooltip
@@ -176,12 +176,20 @@ const TaskHeader = ({
 					onClick={(e) => e.stopPropagation()}
 					data-testid="remote-steer-active">
 					<span>{t("chat:task.steerRemotelyActive")}</span>
-					<button
-						type="button"
-						className="shrink-0 rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
-						onClick={openRemoteDashboard}>
-						{t("chat:task.openRemoteDashboard")}
-					</button>
+					<div className="flex shrink-0 items-center gap-2">
+						<button
+							type="button"
+							className="rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
+							onClick={openRemoteDashboard}>
+							{t("chat:task.openRemoteDashboard")}
+						</button>
+						<button
+							type="button"
+							className="rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
+							onClick={endRemoteSession}>
+							{t("chat:task.endRemoteSession")}
+						</button>
+					</div>
 				</div>
 			)}
 			{canShowRemoteSteer && isZooGateway && remoteControlEnabled && !remoteControlAvailable && (
@@ -190,12 +198,20 @@ const TaskHeader = ({
 					onClick={(e) => e.stopPropagation()}
 					data-testid="remote-steer-unavailable">
 					<span className="text-vscode-descriptionForeground">{t("chat:task.steerRemotelyUnavailable")}</span>
-					<button
-						type="button"
-						className="shrink-0 rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
-						onClick={openRemoteDashboard}>
-						{t("chat:task.openRemoteDashboard")}
-					</button>
+					<div className="flex shrink-0 items-center gap-2">
+						<button
+							type="button"
+							className="rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
+							onClick={openRemoteDashboard}>
+							{t("chat:task.openRemoteDashboard")}
+						</button>
+						<button
+							type="button"
+							className="rounded px-2 py-0.5 text-xs font-medium underline-offset-2 hover:underline"
+							onClick={endRemoteSession}>
+							{t("chat:task.endRemoteSession")}
+						</button>
+					</div>
 				</div>
 			)}
 			{canShowRemoteSteer && isZooGateway && !remoteControlEnabled && (
@@ -207,7 +223,7 @@ const TaskHeader = ({
 					<button
 						type="button"
 						className="shrink-0 rounded bg-vscode-button-background px-2 py-1 text-xs font-medium text-vscode-button-foreground hover:bg-vscode-button-hoverBackground"
-						onClick={enableRemoteSteerAndOpenDashboard}>
+						onClick={startRemoteSessionAndOpenDashboard}>
 						{t("chat:task.steerRemotely")}
 					</button>
 				</div>

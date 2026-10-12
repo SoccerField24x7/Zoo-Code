@@ -26,7 +26,6 @@
 	"command.settings.title": "Configuració",
 	"command.documentation.title": "Documentació",
 	"configuration.title": "Zoo Code",
-	"settings.remoteControl.enabled.description": "Enable remote task control when signed into Zoo. Experimental.",
 	"commands.allowedCommands.description": "Ordres que es poden executar automàticament quan 'Aprova sempre les operacions d'execució' està activat",
 	"commands.deniedCommands.description": "Prefixos d'ordres que seran automàticament denegats sense demanar aprovació. En cas de conflictes amb ordres permeses, la coincidència de prefix més llarga té prioritat. Afegeix * per denegar totes les ordres.",
 	"commands.commandExecutionTimeout.description": "Temps màxim en segons per esperar que l'execució de l'ordre es completi abans d'esgotar el temps (0 = sense temps límit, 1-600s, per defecte: 0s)",

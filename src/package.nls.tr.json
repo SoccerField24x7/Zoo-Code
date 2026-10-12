@@ -26,7 +26,6 @@
 	"command.settings.title": "Ayarlar",
 	"command.documentation.title": "Dokümantasyon",
 	"configuration.title": "Zoo Code",
-	"settings.remoteControl.enabled.description": "Enable remote task control when signed into Zoo. Experimental.",
 	"commands.allowedCommands.description": "'Her zaman yürütme işlemlerini onayla' etkinleştirildiğinde otomatik olarak yürütülebilen komutlar",
 	"commands.deniedCommands.description": "Onay istenmeden otomatik olarak reddedilecek komut önekleri. İzin verilen komutlarla çakışma durumunda en uzun önek eşleşmesi öncelik alır. Tüm komutları reddetmek için * ekleyin.",
 	"commands.commandExecutionTimeout.description": "Komut yürütmesinin tamamlanmasını beklemek için maksimum süre (saniye), zaman aşımından önce (0 = zaman aşımı yok, 1-600s, varsayılan: 0s)",

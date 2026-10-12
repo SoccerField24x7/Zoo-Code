@@ -20,7 +20,6 @@ import {
 
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { Package } from "../../shared/package"
-import type { Mode } from "../../shared/modes"
 import { getCachedZooCodeToken, getZooCodeBaseUrl } from "../zoo-code-auth"
 
 const PRESENCE_INTERVAL_MS = 15_000
@@ -31,6 +30,9 @@ const UNAVAILABLE_BACKOFF_MS = 60_000
 const NOT_ELIGIBLE_BACKOFF_MS = 30_000
 const INSTANCE_ID_STATE_KEY = "zooRemoteControl.instanceId"
 const EVENT_SEQ_STATE_KEY = "zooRemoteControl.eventSeq"
+/** Built-in remote session flag (not a VS Code Configuration setting). */
+const SESSION_ACTIVE_STATE_KEY = "zooRemoteControl.sessionActive"
+const LEGACY_SETTING_KEY = "remoteControl.enabled"
 
 export type ZooRemoteControlBridgeDeps = {
 	api: Pick<RooCodeAPI, "on" | "off" | "sendMessage" | "cancelCurrentTask" | "resumeTask" | "startNewTask">
@@ -124,16 +126,6 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				log: this.log,
 			})
 
-		if (typeof vscode.workspace.onDidChangeConfiguration === "function") {
-			this.disposables.push(
-				vscode.workspace.onDidChangeConfiguration((event) => {
-					if (event.affectsConfiguration("zoo-code.remoteControl.enabled")) {
-						void this.syncActiveState()
-					}
-				}),
-			)
-		}
-
 		if (typeof this.provider.on === "function") {
 			this.provider.on(RooCodeEventName.ProviderProfileChanged, this.onProviderProfileChanged)
 		}
@@ -148,7 +140,44 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			)
 		}
 
-		void this.syncActiveState()
+		void this.migrateLegacySettingThenSync()
+	}
+
+	/** Test helper / webview: whether the user has an active remote session. */
+	public isSessionActive(): boolean {
+		return this.context.globalState.get<boolean>(SESSION_ACTIVE_STATE_KEY) === true
+	}
+
+	/** Start or end remote session (does not cancel the task). */
+	public async setSessionActive(active: boolean): Promise<void> {
+		await this.context.globalState.update(SESSION_ACTIVE_STATE_KEY, active)
+		await this.syncActiveState()
+		await this.provider.postStateToWebview()
+	}
+
+	private async migrateLegacySettingThenSync(): Promise<void> {
+		try {
+			const existing = this.context.globalState.get<boolean>(SESSION_ACTIVE_STATE_KEY)
+			if (existing === undefined) {
+				const legacy =
+					vscode.workspace.getConfiguration(Package.name).get<boolean>(LEGACY_SETTING_KEY, false) === true
+				if (legacy) {
+					await this.context.globalState.update(SESSION_ACTIVE_STATE_KEY, true)
+					try {
+						await vscode.workspace
+							.getConfiguration(Package.name)
+							.update(LEGACY_SETTING_KEY, undefined, vscode.ConfigurationTarget.Global)
+					} catch {
+						// Best-effort clear of the removed setting.
+					}
+				}
+			}
+		} catch (error) {
+			this.log(
+				`[ZooRemoteControl] legacy setting migrate failed: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+		await this.syncActiveState()
 	}
 
 	/** Awaitable teardown so offline presence can finish before extension deactivate returns. */
@@ -244,10 +273,6 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			})
 	}
 
-	private isSettingEnabled(): boolean {
-		return vscode.workspace.getConfiguration(Package.name).get<boolean>("remoteControl.enabled", false) === true
-	}
-
 	private getApiProvider(): string | undefined {
 		try {
 			const getSettings = this.provider.contextProxy?.getProviderSettings
@@ -263,7 +288,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 	private evaluateEligible(): boolean {
 		return isZooRemoteControlEligible({
-			remoteControlEnabled: this.isSettingEnabled(),
+			remoteControlEnabled: this.isSessionActive(),
 			apiProvider: this.getApiProvider(),
 			sessionToken: getCachedZooCodeToken() || undefined,
 		})
@@ -599,7 +624,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 
 		if (result.status === 401 || result.status === 402 || result.status === 403) {
 			this.markNotEligibleBackoff()
-			this.pendingEvents = [...batch.slice(-50), ...this.pendingEvents].slice(0, 200)
+			// Keep the failed batch ahead of anything enqueued during the await; cap from the
+			// tail so the newest events survive under pressure.
+			this.pendingEvents = [...batch, ...this.pendingEvents].slice(-200)
 			return
 		}
 
@@ -610,7 +637,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		}
 
 		if (!result.ok) {
-			this.pendingEvents = [...batch.slice(-50), ...this.pendingEvents].slice(0, 200)
+			this.pendingEvents = [...batch, ...this.pendingEvents].slice(-200)
 			return
 		}
 
@@ -672,7 +699,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				isLifecycleCurrent: (value) => this.isLifecycleCurrent(value),
 				isEligible: () => this.evaluateEligible(),
 				sendMessage: (text, images) => this.api.sendMessage(text, images),
-				handleModeSwitch: (mode) => this.provider.handleModeSwitch(mode as Mode),
+				handleModeSwitch: (mode) => this.provider.handleModeSwitch(mode),
 				getCurrentTask: () => {
 					const task = this.provider.getCurrentTask()
 					if (!task) {
@@ -690,6 +717,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				startNewTask: async (payload) => {
 					await this.api.startNewTask(payload)
 				},
+				endRemoteSession: () => this.setSessionActive(false),
 			},
 		})
 	}

@@ -380,24 +380,20 @@ describe("TaskHeader", () => {
 			mockExtensionState.clineMessages = []
 		})
 
-		it("shows an immediate manual control to enable remote steer, including on completed tasks", () => {
+		it("shows an immediate control to start a remote session, including on completed tasks", () => {
 			mockExtensionState.zooCodeBaseUrl = "https://www.zoocode.dev"
 			renderTaskHeader()
 			const offer = screen.getByTestId("remote-steer-offer")
 			expect(offer).toHaveTextContent("chat:task.steerRemotelyHint")
 			fireEvent.click(screen.getByRole("button", { name: "chat:task.steerRemotely" }))
-			expect(mockPostMessage).toHaveBeenCalledWith({
-				type: "updateVSCodeSetting",
-				setting: "zoo-code.remoteControl.enabled",
-				bool: true,
-			})
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "startRemoteControlSession" })
 			expect(mockPostMessage).toHaveBeenCalledWith({
 				type: "openExternal",
 				url: "https://www.zoocode.dev/dashboard/agents/ide",
 			})
 		})
 
-		it("shows the active remote steer strip with a dashboard link", () => {
+		it("shows the active remote session strip with dashboard and end-session actions", () => {
 			mockExtensionState.remoteControlEnabled = true
 			mockExtensionState.remoteControlAvailable = true
 			mockExtensionState.zooCodeBaseUrl = "https://www.zoocode.dev"
@@ -409,6 +405,8 @@ describe("TaskHeader", () => {
 				type: "openExternal",
 				url: "https://www.zoocode.dev/dashboard/agents/ide",
 			})
+			fireEvent.click(screen.getByText("chat:task.endRemoteSession"))
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "endRemoteControlSession" })
 		})
 
 		it("shows unavailable state when remote control is enabled but the bridge is down", () => {

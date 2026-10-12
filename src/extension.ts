@@ -404,6 +404,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
 let zooRemoteControlBridge: ZooRemoteControlBridge | undefined
 
+export function getZooRemoteControlBridge(): ZooRemoteControlBridge | undefined {
+	return zooRemoteControlBridge
+}
+
 // This method is called when your extension is deactivated.
 export async function deactivate() {
 	outputChannel.appendLine(`${Package.name} extension deactivated`)

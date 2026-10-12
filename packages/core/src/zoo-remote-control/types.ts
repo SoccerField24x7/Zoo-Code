@@ -16,6 +16,7 @@ export const zooRemoteCommandTypeSchema = z.enum([
 	"start_task",
 	"switch_mode",
 	"answer_followup",
+	"end_remote_session",
 ])
 
 export type ZooRemoteCommandType = z.infer<typeof zooRemoteCommandTypeSchema>

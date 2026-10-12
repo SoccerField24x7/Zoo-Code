@@ -13,6 +13,7 @@ function makeHost(overrides: Partial<ZooRemoteCommandHost> = {}): ZooRemoteComma
 		cancelCurrentTask: vi.fn().mockResolvedValue(undefined),
 		resumeTask: vi.fn().mockResolvedValue(undefined),
 		startNewTask: vi.fn().mockResolvedValue(undefined),
+		endRemoteSession: vi.fn().mockResolvedValue(undefined),
 		...overrides,
 	}
 }
@@ -168,6 +169,21 @@ describe("executeRemoteCommand", () => {
 			status: "failed",
 			errorCode: "missing_task_id",
 		})
+	})
+
+	it("acks end_remote_session and leaves the remote session", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const endRemoteSession = vi.fn().mockResolvedValue(undefined)
+
+		await executeRemoteCommand({
+			command: { commandId: "c1", type: "end_remote_session" },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({ endRemoteSession }),
+		})
+
+		expect(endRemoteSession).toHaveBeenCalled()
+		expect(ackCommand).toHaveBeenCalledWith({ commandId: "c1", status: "acked" })
 	})
 
 	it("acks missing_mode for switch_mode without a mode", async () => {

@@ -17,6 +17,8 @@ export type ZooRemoteCommandHost = {
 	cancelCurrentTask: () => Promise<void>
 	resumeTask: (taskId: string) => Promise<void>
 	startNewTask: (payload: { text?: string; images?: string[] }) => Promise<void>
+	/** Leave remote session without cancelling the task. */
+	endRemoteSession: () => Promise<void>
 }
 
 async function failCommand(
@@ -157,6 +159,12 @@ export async function executeRemoteCommand(options: {
 				await host.handleModeSwitch(mode)
 				break
 			}
+			case "end_remote_session":
+				if (!host.isLifecycleCurrent(epoch)) {
+					return
+				}
+				await host.endRemoteSession()
+				break
 			default: {
 				const _exhaustive: never = command.type
 				await failCommand(client, host, epoch, command.commandId, "unknown_command", String(_exhaustive))

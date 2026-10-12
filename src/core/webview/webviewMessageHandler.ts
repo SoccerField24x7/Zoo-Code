@@ -93,7 +93,7 @@ import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
 
-const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv", "zoo-code.remoteControl.enabled"])
+const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
 // Serializes handling of "telemetrySetting" messages. Each invocation reads the previous
 // setting, awaits a persistence write, then applies the new live telemetry state -- with no
@@ -1947,6 +1947,16 @@ export const webviewMessageHandler = async (
 			stopTts()
 			break
 
+		case "startRemoteControlSession": {
+			const { getZooRemoteControlBridge } = await import("../../extension")
+			await getZooRemoteControlBridge()?.setSessionActive(true)
+			break
+		}
+		case "endRemoteControlSession": {
+			const { getZooRemoteControlBridge } = await import("../../extension")
+			await getZooRemoteControlBridge()?.setSessionActive(false)
+			break
+		}
 		case "updateVSCodeSetting": {
 			const { setting } = message
 			const value = message.bool ?? message.value
@@ -1955,8 +1965,6 @@ export const webviewMessageHandler = async (
 				if (ALLOWED_VSCODE_SETTINGS.has(setting)) {
 					const config = vscode.workspace.getConfiguration()
 					const inspected = config.inspect(setting)
-					// Only touch workspace/folder when that scope already defines the key — otherwise
-					// write Global so enabling remote control does not create .vscode/settings.json.
 					const target =
 						inspected?.workspaceFolderValue !== undefined
 							? vscode.ConfigurationTarget.WorkspaceFolder
@@ -1964,9 +1972,6 @@ export const webviewMessageHandler = async (
 								? vscode.ConfigurationTarget.Workspace
 								: vscode.ConfigurationTarget.Global
 					await config.update(setting, value, target)
-					if (setting === "zoo-code.remoteControl.enabled") {
-						await provider.postStateToWebview()
-					}
 				} else {
 					vscode.window.showErrorMessage(`Cannot update restricted VSCode setting: ${setting}`)
 				}

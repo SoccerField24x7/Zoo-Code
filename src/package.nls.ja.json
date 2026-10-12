@@ -26,7 +26,6 @@
 	"command.showRipgrepDiagnostic.title": "Ripgrep 診断を表示",
 	"command.toggleAutoApprove.title": "自動承認を切替",
 	"configuration.title": "Zoo Code",
-	"settings.remoteControl.enabled.description": "Enable remote task control when signed into Zoo. Experimental.",
 	"commands.allowedCommands.description": "'常に実行操作を承認する'が有効な場合に自動実行できるコマンド",
 	"commands.deniedCommands.description": "承認を求めずに自動的に拒否されるコマンドプレフィックス。許可されたコマンドとの競合がある場合、最長プレフィックスマッチが優先されます。すべてのコマンドを拒否するには * を追加してください。",
 	"commands.commandExecutionTimeout.description": "コマンド実行の完了を待つ最大時間（秒）、タイムアウトまで（0 = タイムアウトなし、1-600秒、デフォルト: 0秒）",

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+﻿import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { EventEmitter } from "events"
 
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
@@ -11,10 +11,11 @@ vi.mock("vscode", () => ({
 	workspace: {
 		getConfiguration: vi.fn(() => ({
 			get: vi.fn((_key: string, defaultValue?: boolean) => defaultValue),
+			update: vi.fn().mockResolvedValue(undefined),
 		})),
-		onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
 		workspaceFolders: [{ uri: { fsPath: "/tmp/project" } }],
 	},
+	ConfigurationTarget: { Global: 1, Workspace: 2, WorkspaceFolder: 3 },
 	env: {
 		sessionId: "test-session-id",
 		appName: "Code",
@@ -52,15 +53,16 @@ describe("ZooRemoteControlBridge", () => {
 		globalState: { get: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> }
 		secrets: { onDidChange: ReturnType<typeof vi.fn> }
 	}
-	let getConfigValue: (key: string, defaultValue?: boolean) => boolean
+	let sessionActive = false
 
 	beforeEach(() => {
 		vi.useFakeTimers()
 		vi.clearAllMocks()
 
-		getConfigValue = (_key, defaultValue) => defaultValue ?? false
+		sessionActive = false
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
-			get: vi.fn((key: string, defaultValue?: boolean) => getConfigValue(key, defaultValue)),
+			get: vi.fn((_key: string, defaultValue?: boolean) => defaultValue ?? false),
+			update: vi.fn().mockResolvedValue(undefined),
 		} as never)
 
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("")
@@ -94,9 +96,14 @@ describe("ZooRemoteControlBridge", () => {
 				get: vi.fn((key: string) => {
 					if (key === "zooRemoteControl.instanceId") return "instance-1"
 					if (key === "zooRemoteControl.eventSeq") return 0
+					if (key === "zooRemoteControl.sessionActive") return sessionActive
 					return undefined
 				}),
-				update: vi.fn().mockResolvedValue(undefined),
+				update: vi.fn(async (key: string, value: unknown) => {
+					if (key === "zooRemoteControl.sessionActive") {
+						sessionActive = value === true
+					}
+				}),
 			},
 			secrets: {
 				onDidChange: vi.fn(() => ({ dispose: vi.fn() })),
@@ -127,7 +134,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("activates when opted in with an eligible Zoo session", async () => {
-		getConfigValue = () => true
+		sessionActive = true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
@@ -152,7 +159,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("posts only the workspace folder basename, never an absolute path", async () => {
-		getConfigValue = () => true
+		sessionActive = true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
@@ -178,7 +185,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("does not activate when the provider is not eligible", async () => {
-		getConfigValue = () => true
+		sessionActive = true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.anthropic,
@@ -192,7 +199,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("executes a remote message command and acks success", async () => {
-		getConfigValue = () => true
+		sessionActive = true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
@@ -221,7 +228,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("backs off when the remote endpoints return 404", async () => {
-		getConfigValue = () => true
+		sessionActive = true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
@@ -235,14 +242,14 @@ describe("ZooRemoteControlBridge", () => {
 
 		client.postPresence.mockClear()
 		await vi.advanceTimersByTimeAsync(15_000)
-		// Still in 404 backoff window — presence should not fire again yet.
+		// Still in 404 backoff window â€” presence should not fire again yet.
 		expect(client.postPresence).not.toHaveBeenCalled()
 
 		bridge.dispose()
 	})
 
 	it("publishes non-partial message events while active", async () => {
-		getConfigValue = () => true
+		sessionActive = true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
@@ -273,7 +280,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("deactivates when the session is no longer eligible", async () => {
-		getConfigValue = () => true
+		sessionActive = true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
@@ -297,7 +304,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	async function activateEligibleBridge() {
-		getConfigValue = () => true
+		sessionActive = true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
@@ -723,29 +730,23 @@ describe("ZooRemoteControlBridge", () => {
 		bridge.dispose()
 	})
 
-	it("reacts to configuration and secret changes", async () => {
-		let configListener: ((event: { affectsConfiguration: (key: string) => boolean }) => void) | undefined
+	it("reacts to session start/end and secret changes", async () => {
 		let secretListener: ((event: { key: string }) => void) | undefined
-		vi.mocked(vscode.workspace.onDidChangeConfiguration).mockImplementation((listener) => {
-			configListener = listener as typeof configListener
-			return { dispose: vi.fn() }
-		})
 		context.secrets.onDidChange.mockImplementation((listener: (event: { key: string }) => void) => {
 			secretListener = listener
 			return { dispose: vi.fn() }
 		})
 
-		getConfigValue = () => false
+		sessionActive = false
 		const bridge = createBridge()
 		await vi.advanceTimersByTimeAsync(0)
 		expect(bridge.isActive()).toBe(false)
 
-		getConfigValue = () => true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
 		})
-		configListener?.({ affectsConfiguration: (key) => key === "zoo-code.remoteControl.enabled" })
+		await bridge.setSessionActive(true)
 		await vi.advanceTimersByTimeAsync(0)
 		expect(bridge.isActive()).toBe(true)
 
@@ -757,11 +758,12 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("generates and persists an instance id when none is stored", async () => {
+		sessionActive = true
 		context.globalState.get.mockImplementation((key: string) => {
 			if (key === "zooRemoteControl.eventSeq") return -1
+			if (key === "zooRemoteControl.sessionActive") return sessionActive
 			return undefined
 		})
-		getConfigValue = () => true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
@@ -776,16 +778,20 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("does not activate when instance id persistence fails", async () => {
+		sessionActive = true
 		context.globalState.get.mockImplementation((key: string) => {
 			if (key === "zooRemoteControl.eventSeq") return 0
+			if (key === "zooRemoteControl.sessionActive") return sessionActive
 			return undefined
 		})
 		context.globalState.update.mockImplementation(async (key: string) => {
 			if (key === "zooRemoteControl.instanceId") {
 				throw new Error("storage unavailable")
 			}
+			if (key === "zooRemoteControl.sessionActive") {
+				sessionActive = true
+			}
 		})
-		getConfigValue = () => true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
@@ -799,7 +805,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("awaits serialized event-seq persistence and stops enqueueing after persist failure", async () => {
-		getConfigValue = () => true
+		sessionActive = true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockReturnValue({
 			apiProvider: providerIdentifiers.zooGateway,
@@ -837,7 +843,7 @@ describe("ZooRemoteControlBridge", () => {
 	})
 
 	it("tolerates provider settings lookup failures", async () => {
-		getConfigValue = () => true
+		sessionActive = true
 		vi.mocked(getCachedZooCodeToken).mockReturnValue("zoo_ext_token")
 		provider.contextProxy.getProviderSettings.mockImplementation(() => {
 			throw new Error("settings boom")
