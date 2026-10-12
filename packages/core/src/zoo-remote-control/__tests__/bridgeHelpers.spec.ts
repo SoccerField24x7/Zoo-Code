@@ -14,6 +14,7 @@ describe("bridgeHelpers", () => {
 	it("derives a nickname from posix and windows paths", () => {
 		expect(workspaceNicknameFromFsPath("/Users/me/proj/")).toBe("proj")
 		expect(workspaceNicknameFromFsPath("C:\\Users\\me\\proj\\")).toBe("proj")
+		expect(workspaceNicknameFromFsPath("///")).toBeUndefined()
 		expect(workspaceNicknameFromFsPath(undefined)).toBeUndefined()
 	})
 

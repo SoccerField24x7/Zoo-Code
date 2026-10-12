@@ -4,12 +4,30 @@ export function workspaceNicknameFromFsPath(workspaceRoot: string | undefined) {
 		return undefined
 	}
 
-	return (
-		workspaceRoot
-			.replace(/[/\\]+$/, "")
-			.split(/[/\\]/)
-			.pop() || undefined
-	)
+	// Avoid trailing-separator regexes (CodeQL js/polynomial-redos on long `/` runs).
+	let end = workspaceRoot.length
+	while (end > 0) {
+		const code = workspaceRoot.charCodeAt(end - 1)
+		if (code !== 47 /* / */ && code !== 92 /* \ */) {
+			break
+		}
+		end -= 1
+	}
+	if (end === 0) {
+		return undefined
+	}
+
+	let start = 0
+	for (let i = end - 1; i >= 0; i -= 1) {
+		const code = workspaceRoot.charCodeAt(i)
+		if (code === 47 || code === 92) {
+			start = i + 1
+			break
+		}
+	}
+
+	const nickname = workspaceRoot.slice(start, end)
+	return nickname.length > 0 ? nickname : undefined
 }
 
 export function remoteMessageKey(taskId: string, message: { messageId?: string; ts: number }) {
