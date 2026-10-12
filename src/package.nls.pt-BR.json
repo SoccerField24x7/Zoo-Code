@@ -26,6 +26,7 @@
 	"command.settings.title": "Configurações",
 	"command.documentation.title": "Documentação",
 	"configuration.title": "Zoo Code",
+	"settings.remoteControl.enabled.description": "Enable remote task control when signed into Zoo. Experimental.",
 	"commands.allowedCommands.description": "Comandos que podem ser executados automaticamente quando 'Sempre aprovar operações de execução' está ativado",
 	"commands.deniedCommands.description": "Prefixos de comandos que serão automaticamente negados sem solicitar aprovação. Em caso de conflitos com comandos permitidos, a correspondência de prefixo mais longa tem precedência. Adicione * para negar todos os comandos.",
 	"commands.commandExecutionTimeout.description": "Tempo máximo em segundos para aguardar a conclusão da execução do comando antes do timeout (0 = sem timeout, 1-600s, padrão: 0s)",

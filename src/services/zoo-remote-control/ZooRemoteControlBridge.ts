@@ -101,17 +101,21 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				log: this.log,
 			})
 
-		this.disposables.push(
-			vscode.workspace.onDidChangeConfiguration((event) => {
-				if (event.affectsConfiguration("zoo-code.remoteControl.enabled")) {
-					void this.syncActiveState()
-				}
-			}),
-		)
+		if (typeof vscode.workspace.onDidChangeConfiguration === "function") {
+			this.disposables.push(
+				vscode.workspace.onDidChangeConfiguration((event) => {
+					if (event.affectsConfiguration("zoo-code.remoteControl.enabled")) {
+						void this.syncActiveState()
+					}
+				}),
+			)
+		}
 
-		this.provider.on(RooCodeEventName.ProviderProfileChanged, this.onProviderProfileChanged)
+		if (typeof this.provider.on === "function") {
+			this.provider.on(RooCodeEventName.ProviderProfileChanged, this.onProviderProfileChanged)
+		}
 
-		if (this.context.secrets?.onDidChange) {
+		if (typeof this.context.secrets?.onDidChange === "function") {
 			this.disposables.push(
 				this.context.secrets.onDidChange((event) => {
 					if (event.key === "zoo-code-session-token") {
@@ -127,7 +131,9 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	public dispose(): void {
 		this.disposed = true
 		void this.deactivate({ notifyOffline: true })
-		this.provider.off(RooCodeEventName.ProviderProfileChanged, this.onProviderProfileChanged)
+		if (typeof this.provider.off === "function") {
+			this.provider.off(RooCodeEventName.ProviderProfileChanged, this.onProviderProfileChanged)
+		}
 		for (const disposable of this.disposables) {
 			disposable.dispose()
 		}
@@ -160,12 +166,20 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private isSettingEnabled(): boolean {
-		return vscode.workspace.getConfiguration(Package.name).get<boolean>("remoteControl.enabled", false)
+		return vscode.workspace.getConfiguration(Package.name).get<boolean>("remoteControl.enabled", false) === true
 	}
 
 	private getApiProvider(): string | undefined {
-		const settings: ProviderSettings = this.provider.contextProxy.getProviderSettings()
-		return settings.apiProvider
+		try {
+			const getSettings = this.provider.contextProxy?.getProviderSettings
+			if (typeof getSettings !== "function") {
+				return undefined
+			}
+			const settings: ProviderSettings = getSettings.call(this.provider.contextProxy)
+			return settings?.apiProvider
+		} catch {
+			return undefined
+		}
 	}
 
 	private evaluateEligible(): boolean {
@@ -181,13 +195,17 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			return
 		}
 
-		const eligible = this.evaluateEligible()
-		if (eligible && !this.active) {
-			await this.activate()
-		} else if (!eligible && this.active) {
-			await this.deactivate({ notifyOffline: true })
-		} else if (eligible && this.active) {
-			await this.publishPresence(true)
+		try {
+			const eligible = this.evaluateEligible()
+			if (eligible && !this.active) {
+				await this.activate()
+			} else if (!eligible && this.active) {
+				await this.deactivate({ notifyOffline: true })
+			} else if (eligible && this.active) {
+				await this.publishPresence(true)
+			}
+		} catch (error) {
+			this.log(`[ZooRemoteControl] sync failed: ${error instanceof Error ? error.message : String(error)}`)
 		}
 	}
 

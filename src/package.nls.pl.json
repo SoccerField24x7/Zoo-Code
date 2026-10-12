@@ -26,6 +26,7 @@
 	"command.settings.title": "Ustawienia",
 	"command.documentation.title": "Dokumentacja",
 	"configuration.title": "Zoo Code",
+	"settings.remoteControl.enabled.description": "Enable remote task control when signed into Zoo. Experimental.",
 	"commands.allowedCommands.description": "Polecenia, które mogą być wykonywane automatycznie, gdy włączona jest opcja 'Zawsze zatwierdzaj operacje wykonania'",
 	"commands.deniedCommands.description": "Prefiksy poleceń, które będą automatycznie odrzucane bez pytania o zatwierdzenie. W przypadku konfliktów z dozwolonymi poleceniami, najdłuższe dopasowanie prefiksu ma pierwszeństwo. Dodaj * aby odrzucić wszystkie polecenia.",
 	"commands.commandExecutionTimeout.description": "Maksymalny czas w sekundach oczekiwania na zakończenie wykonania polecenia przed przekroczeniem limitu czasu (0 = brak limitu czasu, 1-600s, domyślnie: 0s)",
