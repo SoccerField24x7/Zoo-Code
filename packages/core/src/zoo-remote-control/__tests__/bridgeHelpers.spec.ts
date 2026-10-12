@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest"
 
 import {
+	classifyRemoteControlHttpResult,
+	generateZooRemoteInstanceId,
 	isRemoteAuthBlockedStatus,
 	isRemoteNotFoundStatus,
 	partialFlushDecision,
 	remoteMessageKey,
 	requeueRemoteEventsKeepingNewest,
 	resolveRemoteMessageAction,
+	resolveZooRemoteEventSeq,
 	workspaceNicknameFromFsPath,
 } from "../bridgeHelpers.js"
 
@@ -48,5 +51,17 @@ describe("bridgeHelpers", () => {
 		expect(isRemoteNotFoundStatus(404)).toBe(true)
 		expect(isRemoteNotFoundStatus(500)).toBe(false)
 		expect(isRemoteNotFoundStatus(undefined)).toBe(false)
+		expect(classifyRemoteControlHttpResult({ ok: false, status: 401 })).toBe("auth_blocked")
+		expect(classifyRemoteControlHttpResult({ ok: false, status: 404 })).toBe("unavailable")
+		expect(classifyRemoteControlHttpResult({ ok: true, status: 200 })).toBe("success")
+		expect(classifyRemoteControlHttpResult({ ok: false, status: 500 })).toBe("failed")
+	})
+
+	it("normalizes event seq and instance ids", () => {
+		expect(resolveZooRemoteEventSeq(undefined)).toBe(0)
+		expect(resolveZooRemoteEventSeq(-1)).toBe(0)
+		expect(resolveZooRemoteEventSeq(12)).toBe(12)
+		expect(generateZooRemoteInstanceId(1, "sess-1")).toBe("sess-1")
+		expect(generateZooRemoteInstanceId(1, undefined)).toMatch(/^zoo-1-/)
 	})
 })

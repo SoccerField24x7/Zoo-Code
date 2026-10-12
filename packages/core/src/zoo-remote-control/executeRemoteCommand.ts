@@ -65,12 +65,21 @@ export async function executeRemoteCommand(options: {
 	epoch: number
 	client: Pick<ZooRemoteControlClient, "ackCommand">
 	host: ZooRemoteCommandHost
+	/** Session-scoped at-most-once set (especially for start_task). */
+	handledCommandIds?: Set<string>
 }): Promise<void> {
-	const { command, epoch, client, host } = options
+	const { command, epoch, client, host, handledCommandIds } = options
 
 	if (!host.isLifecycleCurrent(epoch)) {
 		return
 	}
+
+	if (handledCommandIds?.has(command.commandId)) {
+		await client.ackCommand({ commandId: command.commandId, status: "acked" })
+		return
+	}
+	// Claim before work so concurrent polls cannot double-apply start_task.
+	handledCommandIds?.add(command.commandId)
 
 	if (!host.isEligible()) {
 		await failCommand(client, host, epoch, command.commandId, "not_eligible")

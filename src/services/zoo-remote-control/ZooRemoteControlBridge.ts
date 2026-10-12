@@ -1,9 +1,9 @@
 import * as vscode from "vscode"
 
 import {
+	classifyRemoteControlHttpResult,
 	executeRemoteCommand,
-	isRemoteAuthBlockedStatus,
-	isRemoteNotFoundStatus,
+	generateZooRemoteInstanceId,
 	isZooRemoteControlEligible,
 	partialFlushDecision,
 	projectClineMessageForRemote,
@@ -11,6 +11,7 @@ import {
 	remoteMessageKey,
 	requeueRemoteEventsKeepingNewest,
 	resolveRemoteMessageAction,
+	resolveZooRemoteEventSeq,
 	setZooRemoteControlAvailable,
 	workspaceNicknameFromFsPath,
 	ZooRemoteControlClient,
@@ -89,25 +90,17 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		void this.handleMessageEvent(payload)
 	}
 
-	private readonly onTaskInteractive = (taskId: string) => {
-		this.enqueueEvent({ type: "task_interactive", taskId, timestamp: this.now() })
+	private taskEventHandler(type: ZooRemoteEvent["type"]) {
+		return (taskId: string) => {
+			this.enqueueEvent({ type, taskId, timestamp: this.now() })
+		}
 	}
 
-	private readonly onTaskIdle = (taskId: string) => {
-		this.enqueueEvent({ type: "task_idle", taskId, timestamp: this.now() })
-	}
-
-	private readonly onTaskResumable = (taskId: string) => {
-		this.enqueueEvent({ type: "task_resumable", taskId, timestamp: this.now() })
-	}
-
-	private readonly onTaskCompleted = (taskId: string) => {
-		this.enqueueEvent({ type: "task_completed", taskId, timestamp: this.now() })
-	}
-
-	private readonly onTaskAborted = (taskId: string) => {
-		this.enqueueEvent({ type: "task_aborted", taskId, timestamp: this.now() })
-	}
+	private readonly onTaskInteractive = this.taskEventHandler("task_interactive")
+	private readonly onTaskIdle = this.taskEventHandler("task_idle")
+	private readonly onTaskResumable = this.taskEventHandler("task_resumable")
+	private readonly onTaskCompleted = this.taskEventHandler("task_completed")
+	private readonly onTaskAborted = this.taskEventHandler("task_aborted")
 
 	private readonly onModeSwitched = (taskId: string, mode: string) => {
 		this.enqueueEvent({ type: "mode_switched", taskId, mode, timestamp: this.now() })
@@ -239,13 +232,10 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 		if (existing) {
 			return { id: existing, needsPersist: false }
 		}
-
-		const generated =
-			typeof vscode.env.sessionId === "string" && vscode.env.sessionId.length > 0
-				? vscode.env.sessionId
-				: `zoo-${this.now()}-${Math.random().toString(36).slice(2, 10)}`
-
-		return { id: generated, needsPersist: true }
+		return {
+			id: generateZooRemoteInstanceId(this.now(), vscode.env.sessionId),
+			needsPersist: true,
+		}
 	}
 
 	private async persistInstanceId(id: string): Promise<boolean> {
@@ -261,8 +251,7 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private resolveEventSeq(): number {
-		const existing = this.context.globalState.get<number>(EVENT_SEQ_STATE_KEY)
-		return typeof existing === "number" && Number.isFinite(existing) && existing >= 0 ? existing : 0
+		return resolveZooRemoteEventSeq(this.context.globalState.get<number>(EVENT_SEQ_STATE_KEY))
 	}
 
 	private persistEventSeq(): void {
@@ -376,17 +365,12 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private clearTimers(): void {
-		if (this.presenceTimer) {
-			clearInterval(this.presenceTimer)
-			this.presenceTimer = undefined
-		}
-		if (this.commandTimer) {
-			clearInterval(this.commandTimer)
-			this.commandTimer = undefined
-		}
-		if (this.flushTimer) {
-			clearInterval(this.flushTimer)
-			this.flushTimer = undefined
+		for (const key of ["presenceTimer", "commandTimer", "flushTimer"] as const) {
+			const timer = this[key]
+			if (timer) {
+				clearInterval(timer)
+				this[key] = undefined
+			}
 		}
 	}
 
@@ -527,20 +511,19 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			return
 		}
 
-		if (isRemoteAuthBlockedStatus(result.status)) {
+		const kind = classifyRemoteControlHttpResult(result)
+		if (kind === "auth_blocked") {
 			this.markBackoff(NOT_ELIGIBLE_BACKOFF_MS)
 			if (this.active) {
 				await this.deactivate({ notifyOffline: false })
 			}
 			return
 		}
-
-		if (isRemoteNotFoundStatus(result.status)) {
+		if (kind === "unavailable") {
 			this.markBackoff(UNAVAILABLE_BACKOFF_MS)
 			return
 		}
-
-		if (result.ok) {
+		if (kind === "success") {
 			this.setServerAvailable(true)
 		}
 	}
@@ -573,17 +556,16 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			return
 		}
 
-		if (isRemoteAuthBlockedStatus(result.status)) {
+		const kind = classifyRemoteControlHttpResult(result)
+		if (kind === "auth_blocked") {
 			this.markBackoff(NOT_ELIGIBLE_BACKOFF_MS)
 			return
 		}
-
-		if (isRemoteNotFoundStatus(result.status)) {
+		if (kind === "unavailable") {
 			this.markBackoff(UNAVAILABLE_BACKOFF_MS)
 			return
 		}
-
-		if (result.ok) {
+		if (kind === "success") {
 			this.setServerAvailable(true)
 		}
 	}
@@ -605,25 +587,23 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 			return
 		}
 
-		if (isRemoteAuthBlockedStatus(result.status)) {
+		const kind = classifyRemoteControlHttpResult(result)
+		if (kind === "auth_blocked") {
 			this.markBackoff(NOT_ELIGIBLE_BACKOFF_MS)
 			// Keep the failed batch ahead of anything enqueued during the await; cap from the
 			// tail so the newest events survive under pressure.
 			this.pendingEvents = requeueRemoteEventsKeepingNewest(batch, this.pendingEvents)
 			return
 		}
-
-		if (isRemoteNotFoundStatus(result.status)) {
+		if (kind === "unavailable") {
 			this.markBackoff(UNAVAILABLE_BACKOFF_MS)
 			// Drop batch while the public endpoint is not available yet.
 			return
 		}
-
-		if (!result.ok) {
+		if (kind === "failed") {
 			this.pendingEvents = requeueRemoteEventsKeepingNewest(batch, this.pendingEvents)
 			return
 		}
-
 		this.setServerAvailable(true)
 	}
 
@@ -645,18 +625,17 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				return
 			}
 
-			if (isRemoteAuthBlockedStatus(result.status)) {
+			const kind = classifyRemoteControlHttpResult(result)
+			if (kind === "auth_blocked") {
 				this.markBackoff(NOT_ELIGIBLE_BACKOFF_MS)
 				await this.deactivate({ notifyOffline: false })
 				return
 			}
-
-			if (isRemoteNotFoundStatus(result.status)) {
+			if (kind === "unavailable") {
 				this.markBackoff(UNAVAILABLE_BACKOFF_MS)
 				return
 			}
-
-			if (!result.ok || !result.body) {
+			if (kind !== "success" || !result.body) {
 				return
 			}
 
@@ -674,17 +653,11 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 	}
 
 	private async executeCommand(command: ZooRemoteCommand, epoch: number): Promise<void> {
-		if (this.handledCommandIds.has(command.commandId)) {
-			if (this.isLifecycleCurrent(epoch)) {
-				await this.client.ackCommand({ commandId: command.commandId, status: "acked" })
-			}
-			return
-		}
-
 		await executeRemoteCommand({
 			command,
 			epoch,
 			client: this.client,
+			handledCommandIds: this.handledCommandIds,
 			host: {
 				isLifecycleCurrent: (value) => this.isLifecycleCurrent(value),
 				isEligible: () => this.evaluateEligible(),
@@ -710,6 +683,5 @@ export class ZooRemoteControlBridge implements vscode.Disposable {
 				endRemoteSession: () => this.setSessionActive(false),
 			},
 		})
-		this.handledCommandIds.add(command.commandId)
 	}
 }

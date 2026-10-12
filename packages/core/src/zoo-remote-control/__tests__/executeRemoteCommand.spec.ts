@@ -334,4 +334,29 @@ describe("executeRemoteCommand", () => {
 		expect(handleModeSwitch).toHaveBeenCalledWith("architect")
 		expect(ackCommand).toHaveBeenCalledWith({ commandId: "c1", status: "acked" })
 	})
+
+	it("acks duplicate commandIds without re-running the host action", async () => {
+		const ackCommand = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+		const startNewTask = vi.fn().mockResolvedValue(undefined)
+		const handledCommandIds = new Set<string>()
+
+		await executeRemoteCommand({
+			command: { commandId: "dup", type: "start_task", payload: { text: "first" } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({ startNewTask }),
+			handledCommandIds,
+		})
+		await executeRemoteCommand({
+			command: { commandId: "dup", type: "start_task", payload: { text: "again" } },
+			epoch: 1,
+			client: { ackCommand },
+			host: makeHost({ startNewTask }),
+			handledCommandIds,
+		})
+
+		expect(startNewTask).toHaveBeenCalledTimes(1)
+		expect(ackCommand).toHaveBeenCalledTimes(2)
+		expect(ackCommand).toHaveBeenLastCalledWith({ commandId: "dup", status: "acked" })
+	})
 })

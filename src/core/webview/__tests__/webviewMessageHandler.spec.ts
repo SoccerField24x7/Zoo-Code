@@ -2400,14 +2400,14 @@ describe("webviewMessageHandler - remote control session", () => {
 		expect(mockSetSessionActive).toHaveBeenNthCalledWith(2, false)
 	})
 
-	it("logs and completes when the bridge is unavailable", async () => {
+	it("no-ops when the bridge is unavailable", async () => {
 		mockGetZooRemoteControlBridge.mockReturnValue(undefined)
 
 		await expect(
 			webviewMessageHandler(mockClineProvider, { type: "startRemoteControlSession" }),
 		).resolves.not.toThrow()
 		expect(mockSetSessionActive).not.toHaveBeenCalled()
-		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("bridge unavailable"))
+		expect(mockClineProvider.log).not.toHaveBeenCalled()
 	})
 
 	it("selects the narrowest ConfigurationTarget for updateVSCodeSetting", async () => {

@@ -1980,12 +1980,7 @@ export const webviewMessageHandler = async (
 		case "endRemoteControlSession": {
 			try {
 				const { getZooRemoteControlBridge } = await import("../../extension")
-				const bridge = getZooRemoteControlBridge()
-				if (!bridge) {
-					provider.log("[ZooRemoteControl] session toggle ignored: bridge unavailable")
-					break
-				}
-				await bridge.setSessionActive(message.type === "startRemoteControlSession")
+				await getZooRemoteControlBridge()?.setSessionActive(message.type === "startRemoteControlSession")
 			} catch (error) {
 				provider.log(
 					`[ZooRemoteControl] session toggle failed: ${error instanceof Error ? error.message : String(error)}`,

@@ -69,3 +69,26 @@ export function isRemoteAuthBlockedStatus(status: number | undefined) {
 export function isRemoteNotFoundStatus(status: number | undefined) {
 	return status === 404
 }
+
+export function resolveZooRemoteEventSeq(existing: number | undefined) {
+	return typeof existing === "number" && Number.isFinite(existing) && existing >= 0 ? existing : 0
+}
+
+export function generateZooRemoteInstanceId(now: number, sessionId: string | undefined) {
+	if (typeof sessionId === "string" && sessionId.length > 0) {
+		return sessionId
+	}
+	return `zoo-${now}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+export type RemoteControlHttpKind = "auth_blocked" | "unavailable" | "success" | "failed"
+
+export function classifyRemoteControlHttpResult(result: { ok: boolean; status?: number }): RemoteControlHttpKind {
+	if (isRemoteAuthBlockedStatus(result.status)) {
+		return "auth_blocked"
+	}
+	if (isRemoteNotFoundStatus(result.status)) {
+		return "unavailable"
+	}
+	return result.ok ? "success" : "failed"
+}
