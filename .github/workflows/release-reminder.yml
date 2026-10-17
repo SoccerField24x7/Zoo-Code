@@ -1,7 +1,12 @@
 name: Post weekly release reminder
 
-# Requires repo secret DISCORD_RELEASE_WEBHOOK_URL — Discord webhook for the
-# release-reminders channel. The reminder job fails (noisily) if it is unset.
+# Requires two repo secrets:
+# - DISCORD_RELEASE_WEBHOOK_URL: Discord webhook for the channel that receives
+#   the reminder. The reminder job fails (noisily) if it is unset.
+# - DISCORD_RELEASE_MAINTAINERS: space-separated Discord user mentions in the
+#   <@USER_ID> form, for example "<@123456789012345678> <@987654321098765432>".
+#   Use numeric user IDs, not @handles. Only the <@USER_ID> form pings the user.
+#   If it is unset, the reminder uses a generic "Maintainers" greeting.
 
 on:
     schedule:
@@ -24,24 +29,22 @@ jobs:
             - name: Post release reminder to Discord
               env:
                   DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+                  DISCORD_RELEASE_MAINTAINERS: ${{ secrets.DISCORD_RELEASE_MAINTAINERS }}
               run: |
                   set -euo pipefail
-                  owners=("Elliott" "James" "Toray")
-                  anchor_date="2026-07-17"
-                  seconds_since_anchor=$(($(date -u +%s) - $(date -u -d "$anchor_date" +%s)))
-                  weeks_since_anchor=$((seconds_since_anchor / 604800))
-                  owner="${owners[$((weeks_since_anchor % ${#owners[@]}))]}"
+                  maintainers="${DISCORD_RELEASE_MAINTAINERS:-Maintainers}"
 
                   message=$(cat <<EOF
                   **Weekly release reminder**
 
-                  **${owner}** is on deck for this week's Zoo Code release.
+                  ${maintainers} — Roomote prepares this week's Zoo Code release today at 7:00pm ET and posts the release PR in this channel.
 
-                  1. Create the release branch and prepare the release with \`.roo/commands/release.md\`.
-                  2. Get the release PR approved.
-                  3. Tag the release branch to trigger the Marketplace publish workflow.
-                  4. Approve the deployment when the \`marketplace-production\` environment requests it.
-                  5. After publishing succeeds, add the release PR to the merge queue.
+                  When the release PR is up:
+
+                  1. Review and approve the release PR.
+                  2. Tag the release branch tip (\`v[version]\`) to trigger the Marketplace publish workflow.
+                  3. Approve the deployment when the \`marketplace-production\` environment requests it.
+                  4. After publishing succeeds, add the release PR to the merge queue.
 
                   Avoid merging or rebasing the release branch before publishing, so the approved tag keeps the intended commit SHA.
 
