@@ -326,7 +326,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "oct-2026-v3.88.0-providers-tasks-speed" // v3.88.0 provider/model support, task reliability, faster editing and chat
+	public readonly latestAnnouncementId = "oct-2026-v3.90.0-providers-tools-reasoning" // v3.90.0 providers and models, safer tool execution, reasoning and streaming
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
