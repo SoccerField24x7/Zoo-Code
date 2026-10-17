@@ -6,7 +6,9 @@ name: Post weekly release reminder
 # - DISCORD_RELEASE_MAINTAINERS: space-separated Discord user mentions in the
 #   <@USER_ID> form, for example "<@123456789012345678> <@987654321098765432>".
 #   Use numeric user IDs, not @handles. Only the <@USER_ID> form pings the user.
-#   If it is unset, the reminder uses a generic "Maintainers" greeting.
+#   The reminder rotates through the list and pings one maintainer per week,
+#   anchored to 2026-07-17 (same anchor as the previous rotation). If the
+#   secret is unset, the reminder uses a generic "Maintainers" greeting.
 
 on:
     schedule:
@@ -32,12 +34,20 @@ jobs:
                   DISCORD_RELEASE_MAINTAINERS: ${{ secrets.DISCORD_RELEASE_MAINTAINERS }}
               run: |
                   set -euo pipefail
-                  maintainers="${DISCORD_RELEASE_MAINTAINERS:-Maintainers}"
+                  read -r -a maintainers <<< "${DISCORD_RELEASE_MAINTAINERS:-}"
+                  if [ ${#maintainers[@]} -eq 0 ]; then
+                      on_deck="Maintainers"
+                  else
+                      anchor_date="2026-07-17"
+                      seconds_since_anchor=$(($(date -u +%s) - $(date -u -d "$anchor_date" +%s)))
+                      weeks_since_anchor=$((seconds_since_anchor / 604800))
+                      on_deck="${maintainers[$((weeks_since_anchor % ${#maintainers[@]}))]}"
+                  fi
 
                   message=$(cat <<EOF
                   **Weekly release reminder**
 
-                  ${maintainers} — Roomote prepares this week's Zoo Code release today at 7:00pm ET and posts the release PR in this channel.
+                  ${on_deck} — you are on deck for this week's Zoo Code release. Roomote prepares the release today at 7:00pm ET and posts the release PR in this channel.
 
                   When the release PR is up:
 
