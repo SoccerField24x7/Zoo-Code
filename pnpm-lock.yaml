@@ -13,7 +13,7 @@ overrides:
   undici: 6.28.1
   '@ai-sdk/provider@3': 3.0.19
   '@ai-sdk/provider-utils@4': 4.0.61
-  '@ai-sdk/openai-compatible@2': 2.0.56
+  '@ai-sdk/openai-compatible@2': 2.0.85
   form-data: '>=4.0.4'
   bluebird: '>=3.7.2'
   glob: 11.1.0
@@ -963,8 +963,8 @@ packages:
     peerDependencies:
       zod: 4.6.7
 
-  '@ai-sdk/openai-compatible@2.0.56':
-    resolution: {integrity: sha512-cQrN6OUn/jvsY3OdsU6Wn+ss7vp1iwIcakZKSlSRMnYqShBfyT7Qht+eqmgxs7w9ttrw6FAG6o11AiBs+iEsTA==}
+  '@ai-sdk/openai-compatible@2.0.85':
+    resolution: {integrity: sha512-a3FXe1dTNv4XmlIehVl1cJUmOTMHFBSCIy9a6PdWzL7Tj5GgQAs+kEhjhQhEv9AxY1HFjH3EV2aK4NbWcrRJhw==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: 4.6.7
@@ -9094,7 +9094,7 @@ snapshots:
       '@vercel/oidc': 3.2.0
       zod: 4.6.7
 
-  '@ai-sdk/openai-compatible@2.0.56(zod@4.6.7)':
+  '@ai-sdk/openai-compatible@2.0.85(zod@4.6.7)':
     dependencies:
       '@ai-sdk/provider': 3.0.19
       '@ai-sdk/provider-utils': 4.0.61(zod@4.6.7)
@@ -12291,7 +12291,7 @@ snapshots:
     dependencies:
       '@ai-sdk/anthropic': 3.0.42(zod@4.6.7)
       '@ai-sdk/openai': 3.0.27(zod@4.6.7)
-      '@ai-sdk/openai-compatible': 2.0.56(zod@4.6.7)
+      '@ai-sdk/openai-compatible': 2.0.85(zod@4.6.7)
       '@ai-sdk/provider': 3.0.19
       '@ai-sdk/provider-utils': 4.0.61(zod@4.6.7)
       ai: 7.0.143(zod@4.6.7)
