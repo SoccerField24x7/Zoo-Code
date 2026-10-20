@@ -47,12 +47,11 @@ O Zoo Code aproveita a base criada pelo Roo Code e continua ampliando-a com:
 - **Workflows de terminal e edição mais confiáveis** — correções para encerramento prematuro do terminal, race conditions no estado das tarefas, gerenciamento de contexto, edição de diff e uso de ferramentas específicas de cada provider.
 - **Mais controle sobre seu workspace** — gerenciamento de regras, restrições de MCP por modo, controles de caminhos multi-root, opções de reasoning dos modelos e ações para revisar alterações ao concluir uma tarefa.
 
-## Novidades na v3.80.1
+## Novidades na v3.90.0
 
-🤖 Experimente o GLM-5.3-Flash e o Gemini 3.7 Flash com 50% de desconto por 2 semanas e o MiniMax M3 totalmente GRÁTIS para usuários com saldo no novo Zoo Gateway. https://zoocode.dev/models
-
-- **Novo modelo** — o GLM-5.3-Flash agora está disponível pela Z AI.
-- **Correções de confiabilidade** — restauração das aprovações de subtarefas e correções para a saída de ferramenta vazia no Vertex Gemini 3.7, falhas na inicialização do terminal, erros do serviço em segundo plano e a legibilidade em diferentes temas da IDE.
+- ✨ **Provedores e modelos:** O GitHub Copilot agora é um provedor: entre e o Zoo Code carrega seus modelos do Copilot. O IO Intelligence é um provedor com a própria chave de API. O Gemini 4 Argon está no Gemini e no Vertex. O GPT-6 Luna está no OpenCode Go. O Gemini 4 Argon e o GPT-6 Luna também estão no Zoo Gateway.
+- 🧭 **Execução de ferramentas:** Repetir a mesma chamada de ferramenta gera um aviso e depois o Zoo Code para esse loop. Desativar `attempt_completion` não deixa mais uma tarefa sem conseguir terminar. Mensagens na fila passam pelas mesmas verificações de proteção de comandos que os comandos enviados diretamente.
+- ⚡ **Raciocínio e streaming:** O pensamento adaptativo da Anthropic aparece no chat e os thinking tokens são contados. O botão R1 mantém o raciocínio do llama.cpp, Ollama e LM Studio. O Codex mantém o raciocínio criptografado junto com o resumo que você vê. Os streams de modelo de linguagem do VS Code usam guarded recovery quando um stream falha.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

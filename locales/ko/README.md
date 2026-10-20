@@ -45,12 +45,11 @@ Zoo Code는 Roo Code가 만든 기반 위에서 다음 기능을 더하며 계�
 - **더 안정적인 터미널 및 편집 워크플로우** — 터미널 조기 완료, 작업 상태 경합, 컨텍스트 관리, diff 편집, 프로바이더별 도구 사용 문제를 수정.
 - **워크스페이스를 더 세밀하게 제어** — 규칙 관리, 모드별 MCP 제한, 멀티 루트 경로 제어, 모델 reasoning 옵션, 완료 시 변경 사항 검토 작업을 제공.
 
-## v3.80.1의 새로운 기능
+## v3.90.0의 새로운 기능
 
-🤖 새로운 Zoo Gateway에서 잔액이 있는 사용자는 GLM-5.3-Flash와 Gemini 3.7 Flash를 2주간 50% 할인된 가격으로, MiniMax M3는 완전히 무료로 이용할 수 있습니다. https://zoocode.dev/models
-
-- **새로운 모델** — 이제 Z AI를 통해 GLM-5.3-Flash를 사용할 수 있습니다.
-- **안정성 수정** — 하위 작업 승인을 복원하고 Vertex Gemini 3.7의 빈 tool 출력, 터미널 시작 실패, 백그라운드 서비스 오류, 다양한 IDE 테마에서의 가독성 문제를 수정했습니다.
+- ✨ **Provider와 모델:** GitHub Copilot이 이제 provider입니다. 로그인하면 Zoo Code가 Copilot 모델을 불러옵니다. IO Intelligence는 자체 API 키를 쓰는 provider입니다. Gemini 4 Argon은 Gemini와 Vertex에 있습니다. GPT-6 Luna는 OpenCode Go에 있습니다. Gemini 4 Argon과 GPT-6 Luna는 Zoo Gateway에도 있습니다.
+- 🧭 **도구 실행:** 같은 도구 호출을 반복하면 경고가 나오고, 그다음 Zoo Code가 그 루프를 멈춥니다. `attempt_completion`을 꺼도 작업이 끝나지 못하는 상태가 되지 않습니다. 대기 중인 메시지는 직접 보내는 명령과 같은 명령 보호 검사를 거칩니다.
+- ⚡ **추론과 스트리밍:** Anthropic adaptive thinking이 채팅에 표시되고 thinking token이 집계됩니다. R1 토글은 llama.cpp, Ollama, LM Studio의 추론을 유지합니다. Codex는 보이는 요약과 함께 암호화된 추론을 유지합니다. VS Code language model 스트림은 스트림이 실패하면 guarded recovery를 사용합니다.
 
 ## Zoo Code가 당신을 위해 무엇을 할 수 있을까요?
 

@@ -190,9 +190,26 @@ describe("McpOAuthClientProvider", () => {
 
 			expect(metadata.client_name).toBe("Roo Code")
 			expect(metadata.redirect_uris).toEqual(["http://localhost:0/callback"])
-			expect(metadata.grant_types).toContain("authorization_code")
+			expect(metadata.grant_types).toEqual(["authorization_code", "refresh_token"])
 			expect(metadata.response_types).toContain("code")
 			expect(metadata.token_endpoint_auth_method).toBe("none")
+			expect(metadata).toMatchObject({ application_type: "native" })
+			await provider.close()
+		})
+
+		it("should default to authorization code when server grant metadata is omitted", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						token_endpoint_auth_methods_supported: ["none"],
+					}),
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			expect(provider.clientMetadata.grant_types).toEqual(["authorization_code"])
 			await provider.close()
 		})
 
@@ -205,6 +222,61 @@ describe("McpOAuthClientProvider", () => {
 			)
 
 			expect(provider.clientMetadata.client_name).toBe("figma")
+			await provider.close()
+		})
+
+		it("should exclude jwt-bearer from advertised grant types", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						token_endpoint_auth_methods_supported: ["none"],
+						grant_types_supported: [
+							"authorization_code",
+							"refresh_token",
+							"urn:ietf:params:oauth:grant-type:jwt-bearer",
+						],
+					}),
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			expect(provider.clientMetadata.grant_types).toEqual(["authorization_code", "refresh_token"])
+			await provider.close()
+		})
+
+		it("should exclude unknown advertised grant types", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						token_endpoint_auth_methods_supported: ["none"],
+						grant_types_supported: ["authorization_code", "urn:example:grant-type:foo"],
+					}),
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			expect(provider.clientMetadata.grant_types).toEqual(["authorization_code"])
+			await provider.close()
+		})
+
+		it("should reject registration metadata when authorization code is unsupported", async () => {
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						token_endpoint_auth_methods_supported: ["none"],
+						grant_types_supported: ["refresh_token"],
+					}),
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
+
+			expect(() => provider.clientMetadata).toThrow("authorization_code")
 			await provider.close()
 		})
 	})
@@ -262,6 +334,26 @@ describe("McpOAuthClientProvider", () => {
 			await provider.close()
 		})
 
+		it.each([
+			["a different issuer", "https://evil.example.com"],
+			["no issuer (saved by an older version)", undefined],
+		])("should not refresh and should clear stored data when stored data has %s", async (_label, issuer) => {
+			setupCallbackServerMock()
+			const secretStorage = createMockSecretStorage()
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", secretStorage)
+
+			mockFetch.mockClear() // discard discovery calls made by create()
+			await secretStorage.saveOAuthData("https://example.com/mcp", {
+				tokens: { access_token: "expired-access", refresh_token: "valid-refresh", token_type: "Bearer" },
+				expires_at: Date.now() - 1000,
+				...(issuer ? { issuer } : {}),
+			})
+
+			expect(await provider.tokens()).toBeUndefined()
+			expect(mockFetch).not.toHaveBeenCalled()
+			expect(await secretStorage.getOAuthData("https://example.com/mcp")).toBeUndefined()
+		})
+
 		it("should refresh tokens when access token is expired but refresh token exists", async () => {
 			setupCallbackServerMock()
 			const secretStorage = createMockSecretStorage()
@@ -283,6 +375,7 @@ describe("McpOAuthClientProvider", () => {
 			await secretStorage.saveOAuthData("https://example.com/mcp", {
 				tokens: initialTokens,
 				expires_at: Date.now() - 1000,
+				issuer: "https://auth.example.com",
 			})
 
 			mockFetch.mockResolvedValueOnce({
@@ -716,6 +809,7 @@ describe("McpOAuthClientProvider", () => {
 			await secretStorage.saveOAuthData("https://example.com/mcp", {
 				tokens: { access_token: "cached-token", token_type: "Bearer" },
 				expires_at: Date.now() + 3600000,
+				issuer: "https://auth.example.com",
 				client_info: {
 					client_id: "cached-client-id",
 					client_name: "Test Client",
@@ -743,6 +837,7 @@ describe("McpOAuthClientProvider", () => {
 			await secretStorage.saveOAuthData("https://example.com/mcp", {
 				tokens: { access_token: "cached-token", token_type: "Bearer" },
 				expires_at: Date.now() + 3600000,
+				issuer: "https://auth.example.com",
 				client_info: {
 					client_id: "cached-client-id",
 					client_name: "Test Client",
@@ -758,6 +853,32 @@ describe("McpOAuthClientProvider", () => {
 
 			// Should still reuse the cached client_id, NOT perform a new DCR
 			expect((await provider.clientInformation())?.client_id).toBe("cached-client-id")
+			await provider.close()
+		})
+
+		it("should not reuse cached client_info registered with a different issuer", async () => {
+			setupCallbackServerMock()
+			const secretStorage = createMockSecretStorage()
+			await secretStorage.saveOAuthData("https://example.com/mcp", {
+				tokens: { access_token: "cached-token", token_type: "Bearer" },
+				expires_at: Date.now() + 3600000,
+				issuer: "https://evil.example.com",
+				client_info: {
+					client_id: "cached-client-id",
+					client_secret: "cached-secret",
+					redirect_uris: ["http://localhost:9999/callback"],
+				},
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", secretStorage)
+			mockFetch.mockClear()
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () => Promise.resolve({ client_id: "new-client-id", redirect_uris: [provider.redirectUrl] }),
+			})
+			await provider.registerClientIfNeeded()
+
+			expect((await provider.clientInformation())?.client_id).toBe("new-client-id")
 			await provider.close()
 		})
 
@@ -803,6 +924,47 @@ describe("McpOAuthClientProvider", () => {
 			await provider.registerClientIfNeeded()
 
 			expect((await provider.clientInformation())?.client_id).toBe("new-client-id")
+			await provider.close()
+		})
+
+		it("should register when the endpoint rejects unsupported grant types", async () => {
+			setupCallbackServerMock()
+			const secretStorage = createMockSecretStorage()
+
+			mockFetch.mockClear()
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						authorization_endpoint: "https://auth.example.com/authorize",
+						token_endpoint: "https://auth.example.com/token",
+						registration_endpoint: "https://auth.example.com/register",
+						token_endpoint_auth_methods_supported: ["none"],
+						grant_types_supported: [
+							"authorization_code",
+							"refresh_token",
+							"urn:ietf:params:oauth:grant-type:jwt-bearer",
+						],
+					}),
+			})
+			mockFetch.mockImplementationOnce((_url, init) => {
+				const body = JSON.parse(init?.body as string)
+				const hasUnsupportedGrant = body.grant_types.some(
+					(grantType: string) => !["authorization_code", "refresh_token"].includes(grantType),
+				)
+
+				return Promise.resolve({
+					ok: !hasUnsupportedGrant,
+					status: hasUnsupportedGrant ? 400 : 200,
+					json: () => Promise.resolve({ client_id: "registered-client-id" }),
+				})
+			})
+
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", secretStorage)
+
+			await expect(provider.registerClientIfNeeded()).resolves.toBeUndefined()
+			expect((await provider.clientInformation())?.client_id).toBe("registered-client-id")
 			await provider.close()
 		})
 

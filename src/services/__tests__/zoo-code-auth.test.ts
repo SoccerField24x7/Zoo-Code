@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import * as vscode from "vscode"
 import { providerIdentifiers } from "@roo-code/types"
 
 import * as modelCache from "../../api/providers/fetchers/modelCache"
@@ -21,7 +20,7 @@ import {
 vi.mock("vscode", () => ({
 	workspace: {
 		getConfiguration: vi.fn(() => ({
-			get: vi.fn((key: string, defaultValue?: string) => defaultValue),
+			get: vi.fn((_key: string, defaultValue?: string) => defaultValue),
 		})),
 	},
 	window: {

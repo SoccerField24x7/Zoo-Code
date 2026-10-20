@@ -456,11 +456,14 @@ describe("ZooGatewayHandler", () => {
 			])
 		})
 
-		it("yields reasoning chunks from delta.reasoning_content before text", async () => {
+		it("yields reasoning chunks from delta.reasoning and delta.reasoning_content before text", async () => {
 			mockCreate.mockImplementation(async () =>
 				asyncStreamFrom([
 					{
-						choices: [{ delta: { reasoning_content: "thinking hard", content: "answer" }, index: 0 }],
+						choices: [{ delta: { reasoning: "Let me think" }, index: 0 }],
+					},
+					{
+						choices: [{ delta: { reasoning_content: " carefully", content: "answer" }, index: 0 }],
 					},
 				]),
 			)
@@ -469,9 +472,49 @@ describe("ZooGatewayHandler", () => {
 			const chunks = await collectStream(handler.createMessage("prompt", [{ role: "user", content: "Hi" }]))
 
 			expect(chunks).toEqual([
-				{ type: "reasoning", text: "thinking hard" },
+				{ type: "reasoning", text: "Let me think" },
+				{ type: "reasoning", text: " carefully" },
 				{ type: "text", text: "answer" },
 			])
+		})
+
+		it("preserves reasoning on follow-up requests for non-Anthropic models", () => {
+			const handler = new ZooGatewayHandler({ ...mockOptions, zooGatewayModelId: "reflection/beam-free" })
+
+			expect(handler.getModel().info.preserveReasoning).toBe(true)
+		})
+
+		it("leaves Anthropic models on their existing thinking path", () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			expect(handler.getModel().info.preserveReasoning).toBeUndefined()
+		})
+
+		it("sends reasoning_content on the follow-up request when history has a reasoning block", async () => {
+			mockCreate.mockImplementation(async () => asyncStreamFrom([]))
+			const handler = new ZooGatewayHandler({ ...mockOptions, zooGatewayModelId: "reflection/beam-free" })
+			const history = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning" as const, text: "I need to read a file.", summary: [] },
+						{ type: "tool_use" as const, id: "call_abc", name: "read_file", input: { path: "foo.txt" } },
+					],
+				},
+				{
+					role: "user" as const,
+					content: [{ type: "tool_result" as const, tool_use_id: "call_abc", content: "file contents" }],
+				},
+			] as unknown as Parameters<ZooGatewayHandler["createMessage"]>[1]
+
+			await handler.createMessage("prompt", history).next()
+
+			const assistant = mockCreate.mock.calls[0][0].messages.find(
+				(message: { role?: string }) => message.role === "assistant",
+			)
+			expect(assistant.reasoning_content).toBe("I need to read a file.")
+			expect(assistant.tool_calls[0].id).toBe("call_abc")
+			expect(assistant.tool_calls[0].function.name).toBe("read_file")
 		})
 
 		it("does not yield a reasoning chunk when the delta has no reasoning text", async () => {
@@ -756,6 +799,77 @@ describe("ZooGatewayHandler", () => {
 
 			expect(getModels).toHaveBeenCalled()
 			expect(refreshModels).not.toHaveBeenCalled()
+		})
+
+		it("settles the waiter with a rejection when the signal aborts mid-fetch", async () => {
+			// A caller that gives up must not leave a handler-side waiter pending
+			// on the (shared) catalog fetch: with an observing signal, the
+			// ensureModelFetched promise rejects at abort time, while the
+			// underlying fetch continues untouched for any other waiter.
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(() => new Promise(() => {}))
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+
+			const wait = handler.ensureModelFetched(controller.signal)
+			// Let the waiter attach its abort listener before cancelling.
+			await Promise.resolve()
+			controller.abort()
+
+			await expect(wait).rejects.toThrow()
+		})
+
+		it("settles the waiter when the fetch wins against a live signal and detaches the listener", async () => {
+			// Fetch-wins branch: resolve() must settle the await (a dropped
+			// resolve or a detached .then handler hangs this test), the abort
+			// listener must be registered with the real { once: true } options
+			// object, and the detach must target the *same* event name/handler
+			// pair that was registered — a mutated event name detaches nothing.
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			await handler.ensureModelFetched(controller.signal)
+
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
+			const registered = addEventListenerSpy.mock.calls.find(([event]) => event === "abort")
+			expect(registered).toBeDefined()
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", registered?.[1])
+		})
+
+		it("rejects a signal-observing waiter with the fetch error and detaches the listener", async () => {
+			// Rejection-branch twin of the fetch-wins test: reject(error) must
+			// propagate the catalog failure to the waiter (a dropped reject hangs
+			// this test) and the listener must be detached under the right event
+			// name. The no-signal reject path cannot attach a listener, so this is the only
+			// coverage of the reject-side detach.
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockRejectedValueOnce(new Error("network down"))
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			await expect(handler.ensureModelFetched(controller.signal)).rejects.toThrow("network down")
+			const registered = addEventListenerSpy.mock.calls.find(([event]) => event === "abort")
+			expect(registered).toBeDefined()
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", registered?.[1])
+		})
+
+		it("never starts a wait when the signal is already aborted", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(handler.ensureModelFetched(controller.signal)).rejects.toThrow()
+			// Without the spy, a guard relocated after fetchModel() starts would
+			// still reject here and settle identically; zero getModels calls pins
+			// that the check runs before the fetch starts.
+			expect(vitest.mocked(getModels)).not.toHaveBeenCalled()
 		})
 
 		it("skips the fetch when models are already populated", async () => {

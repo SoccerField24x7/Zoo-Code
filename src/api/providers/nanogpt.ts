@@ -8,16 +8,23 @@ import {
 	nanoGptDefaultModelInfo,
 	providerIdentifiers,
 	type ModelInfo,
+	type ModelRecord,
 	type NanoGptRoutingPreference,
 	type ReasoningEffortExtended,
 } from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import type { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
-import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
+import type {
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+	SingleCompletionHandler,
+} from "../index"
 import { RouterProvider } from "./router-provider"
+import { getNanoGptModels } from "./fetchers/nanogpt"
 import { handleProviderError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
@@ -32,15 +39,41 @@ type NanoGptCachingRequest = { caching?: true }
 const NANO_GPT_MERGED_TOOL_RESULT_MODELS = new Set(["meta/muse-spark-1.2-contributor"])
 
 const NANO_GPT_ASTRA_MODEL_IDS = new Set(["openai/gpt-6-astra", "openai/gpt-6-astra-pro"])
+const NANO_GPT_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 
 function getReasoningEffort(options: ApiHandlerOptions, info: ModelInfo): ReasoningEffortExtended | undefined {
 	const configured = options.reasoningEffort
+	// "none" with enableReasoningEffort: true is an explicit level selection, not a disable.
 	const reasoningDisabled =
-		configured === "disable" || configured === "none" || options.enableReasoningEffort === false
+		configured === "disable" ||
+		(configured === "none" && options.enableReasoningEffort !== true) ||
+		options.enableReasoningEffort === false
 	const supported = info.supportsReasoningEffort
 
-	if (!reasoningDisabled && configured && configured !== "minimal") {
-		if (supported === true || (Array.isArray(supported) && supported.includes(configured))) return configured
+	if (reasoningDisabled && (supported === true || (Array.isArray(supported) && supported.includes("disable")))) {
+		return undefined
+	}
+
+	// When "none" is explicitly enabled, resolve it to the lowest canonical supported effort.
+	const noneEnabled = !reasoningDisabled && configured === "none"
+	const candidates = [reasoningDisabled ? undefined : configured, info.reasoningEffort]
+	if (noneEnabled || (Array.isArray(supported) && !supported.includes("disable"))) {
+		candidates.push(
+			NANO_GPT_REASONING_EFFORTS.find(
+				(effort) => supported === true || (Array.isArray(supported) && supported.includes(effort)),
+			),
+		)
+	}
+
+	for (const effort of candidates) {
+		if (
+			effort &&
+			effort !== "none" &&
+			effort !== "minimal" &&
+			(supported === true || (Array.isArray(supported) && supported.includes(effort)))
+		) {
+			return effort
+		}
 	}
 
 	const fallback = info.reasoningEffort
@@ -69,6 +102,15 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			defaultModelId: nanoGptDefaultModelId,
 			defaultModelInfo: nanoGptDefaultModelInfo,
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: false, keyScoped: true, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getNanoGptModels(options.apiKey, ...fetchOpts)
 	}
 
 	private getRequestModelId(canonicalModelId: string): string {
@@ -106,7 +148,12 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			stream: true,
 			stream_options: { include_usage: true },
 			max_tokens: info.maxTokens ?? undefined,
-			tools: this.convertToolsForOpenAI(metadata?.tools),
+			// Preserve the declared schema instead of making every optional field
+			// required for OpenAI strict mode (e.g. read_file's indentation options).
+			// Non-strict generation still retains every original required constraint.
+			tools: metadata?.tools?.map((tool) =>
+				tool.type === "function" ? { ...tool, function: { ...tool.function, strict: false } } : tool,
+			),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: isAstra ? false : (metadata?.parallelToolCalls ?? true),
 			...(this.options.nanoGptRoutingPreference === "caching" ? { caching: true } : {}),
