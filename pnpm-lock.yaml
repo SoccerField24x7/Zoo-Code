@@ -133,7 +133,7 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(vitest@4.1.11)
       execa:
-        specifier: ^9.5.2
+        specifier: 9.6.1
         version: 9.6.1
       ink-testing-library:
         specifier: 4.0.0
@@ -886,7 +886,7 @@ importers:
         specifier: workspace:^
         version: link:../packages/config-typescript
       '@tailwindcss/vite':
-        specifier: ^4.0.0
+        specifier: 4.3.3
         version: 4.3.3(vite@8.3.4(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       '@testing-library/jest-dom':
         specifier: 6.9.1

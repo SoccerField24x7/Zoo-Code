@@ -98,7 +98,7 @@
 		"@types/react-dom": "18.3.7",
 		"@types/stacktrace-js": "2.0.3",
 		"@types/vscode-webview": "1.57.5",
-		"@tailwindcss/vite": "^4.0.0",
+		"@tailwindcss/vite": "4.3.3",
 		"@vitejs/plugin-react": "5.2.0",
 		"@vitest/coverage-v8": "4.1.11",
 		"@vitest/ui": "4.1.11",
