@@ -21,8 +21,7 @@ const MODEL_DISCOVERY_TIMEOUT_MS = 15_000
  */
 
 export type ZooGatewayModelsFetchResult =
-	| { kind: "ok"; models: Record<string, ModelInfo>; etag?: string }
-	| { kind: "not_modified" }
+	{ kind: "ok"; models: Record<string, ModelInfo>; etag?: string } | { kind: "not_modified" }
 
 export async function getZooGatewayModels(
 	options?: ApiHandlerOptions & { ifNoneMatch?: string },

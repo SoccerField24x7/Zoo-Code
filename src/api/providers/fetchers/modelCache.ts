@@ -877,6 +877,8 @@ export function getModelsFromCache(options: GetModelsOptions, handler: ApiHandle
 /**
  * Clears auth-session maps and the empty-response throttle for test isolation.
  * Prefer this over `vi.resetModules()` so mutation testing instruments the same module instance.
+ *
+ * @knipignore
  */
 export function resetModelCacheTransientStateForTests(): void {
 	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
@@ -891,7 +893,11 @@ export function resetModelCacheTransientStateForTests(): void {
 	inFlightRefresh.clear()
 }
 
-/** Test-only: observe clear-generation map size (non-auth clears must not insert entries). */
+/**
+ * Test-only: observe clear-generation map size (non-auth clears must not insert entries).
+ *
+ * @knipignore
+ */
 export function authScopedClearGenerationSizeForTests(): number {
 	return authScopedClearGeneration.size
 }
