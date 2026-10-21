@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest"
+import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js"
 
 // Mock vscode
 vi.mock("vscode", () => ({
@@ -435,7 +436,6 @@ describe("McpOAuthClientProvider", () => {
 			}
 			const refreshedTokens = {
 				access_token: "new-access",
-				refresh_token: "new-refresh",
 				token_type: "Bearer",
 				expires_in: 3600,
 			}
@@ -453,12 +453,49 @@ describe("McpOAuthClientProvider", () => {
 			})
 
 			const result = await provider.tokens()
-			expect(result).toEqual(refreshedTokens)
+			expect(result).toEqual({ ...refreshedTokens, refresh_token: "valid-refresh" })
 			expect(mockFetch).toHaveBeenCalledWith(
 				expect.stringContaining("/token"),
 				expect.objectContaining({
 					body: expect.stringContaining("grant_type=refresh_token"),
 				}),
+			)
+			expect((await secretStorage.getOAuthData("https://example.com/mcp"))?.tokens.refresh_token).toBe(
+				"valid-refresh",
+			)
+			await provider.close()
+		})
+
+		it("should use a rotated refresh token when the server returns one", async () => {
+			setupCallbackServerMock()
+			const secretStorage = createMockSecretStorage()
+			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", secretStorage)
+			await provider.saveClientInformation({ client_id: "id", redirect_uris: [] } as OAuthClientInformationFull)
+			await secretStorage.saveOAuthData("https://example.com/mcp", {
+				tokens: {
+					access_token: "expired-access",
+					refresh_token: "old-refresh",
+					token_type: "Bearer",
+				},
+				expires_at: Date.now() - 1000,
+				issuer: "https://auth.example.com",
+			})
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						access_token: "new-access",
+						refresh_token: "new-refresh",
+						token_type: "Bearer",
+						expires_in: 3600,
+					}),
+			})
+
+			const result = await provider.tokens()
+
+			expect(result?.refresh_token).toBe("new-refresh")
+			expect((await secretStorage.getOAuthData("https://example.com/mcp"))?.tokens.refresh_token).toBe(
+				"new-refresh",
 			)
 			await provider.close()
 		})

@@ -624,8 +624,12 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		}
 
 		const tokens = (await response.json()) as OAuthTokens
-		await this.saveTokens(tokens, clientId)
-		return tokens
+		const mergedTokens: OAuthTokens = {
+			...tokens,
+			refresh_token: tokens.refresh_token ?? refreshToken,
+		}
+		await this.saveTokens(mergedTokens, clientId)
+		return mergedTokens
 	}
 
 	/** Close the local callback server. Always call this when done. */

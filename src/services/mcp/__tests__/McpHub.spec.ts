@@ -3,11 +3,15 @@ import * as path from "path"
 
 import type { Mock } from "vitest"
 import type { ExtensionContext, Uri } from "vscode"
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 
 import type { ClineProvider } from "../../../core/webview/ClineProvider"
+import type { SecretStorageService } from "../SecretStorageService"
 
 import type { McpHub as McpHubType, McpConnection, ConnectedMcpConnection, DisconnectedMcpConnection } from "../McpHub"
 import { ServerConfigSchema, McpHub } from "../McpHub"
+import { McpOAuthClientProvider } from "../McpOAuthClientProvider"
 import { OAUTH_FLOW_TIMEOUT_MS } from "../constants"
 import { t } from "../../../i18n"
 
@@ -126,6 +130,18 @@ vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
 	Client: vi.fn(),
+}))
+
+vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
+	StreamableHTTPClientTransport: vi.fn(),
+}))
+
+vi.mock("../McpOAuthClientProvider", () => ({
+	McpOAuthClientProvider: {
+		create: vi.fn(),
+		isKnownNonOAuth: vi.fn().mockReturnValue(false),
+		clearNonOAuthCache: vi.fn(),
+	},
 }))
 
 // Mock chokidar
@@ -389,6 +405,111 @@ describe("McpHub", () => {
 
 			await expect(mcpHub.getMcpSettingsFilePath()).rejects.toThrow("EACCES: permission denied")
 			expect(fs.writeFile).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("static OAuth connection wiring", () => {
+		it("passes static OAuth options, performs discovery, and skips dynamic registration", async () => {
+			const streamableModule = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
+			const StreamableHTTPClientTransport = streamableModule.StreamableHTTPClientTransport as ReturnType<
+				typeof vi.fn
+			>
+			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
+			const Client = clientModule.Client as ReturnType<typeof vi.fn>
+			const mockAuthProvider = {
+				registerClientIfNeeded: vi.fn(),
+				close: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.mocked(McpOAuthClientProvider.create).mockResolvedValue(
+				mockAuthProvider as unknown as McpOAuthClientProvider,
+			)
+			const mockTransport = { close: vi.fn().mockResolvedValue(undefined) }
+			StreamableHTTPClientTransport.mockImplementation(function () {
+				return mockTransport as unknown as StreamableHTTPClientTransport
+			})
+			Client.mockImplementation(function () {
+				return {
+					connect: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn(),
+					request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				} as unknown as Client
+			})
+			const secretStorage = {
+				hasOAuthData: vi.fn().mockResolvedValue(false),
+			} as unknown as SecretStorageService
+			const oauth = {
+				clientId: "registered-client",
+				scope: "openid offline_access",
+				redirectUri: "http://localhost:33418/callback",
+				resource: false as const,
+			}
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					mcpServers: {
+						"static-oauth-server": {
+							type: "streamable-http",
+							url: "https://example.com/mcp",
+							oauth,
+						},
+					},
+				}),
+			)
+
+			const hub = new McpHub(mockProvider as ClineProvider, secretStorage)
+			await hub.waitUntilReady()
+
+			expect(McpOAuthClientProvider.create).toHaveBeenCalledWith(
+				"https://example.com/mcp",
+				secretStorage,
+				"static-oauth-server",
+				{ skipDiscovery: false, ...oauth },
+			)
+			expect(mockAuthProvider.registerClientIfNeeded).not.toHaveBeenCalled()
+			expect(StreamableHTTPClientTransport).toHaveBeenCalledWith(
+				new URL("https://example.com/mcp"),
+				expect.objectContaining({ authProvider: mockAuthProvider }),
+			)
+		})
+
+		it("closes a static OAuth provider when the hub is disposed during provider creation", async () => {
+			const streamableModule = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
+			const StreamableHTTPClientTransport = streamableModule.StreamableHTTPClientTransport as ReturnType<
+				typeof vi.fn
+			>
+			let resolveProvider!: (provider: McpOAuthClientProvider) => void
+			vi.mocked(McpOAuthClientProvider.create).mockReturnValueOnce(
+				new Promise<McpOAuthClientProvider>((resolve) => {
+					resolveProvider = resolve
+				}),
+			)
+			const mockAuthProvider = {
+				registerClientIfNeeded: vi.fn(),
+				close: vi.fn().mockResolvedValue(undefined),
+			} as unknown as McpOAuthClientProvider
+			const secretStorage = {
+				hasOAuthData: vi.fn().mockResolvedValue(false),
+			} as unknown as SecretStorageService
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					mcpServers: {
+						"static-oauth-server": {
+							type: "streamable-http",
+							url: "https://example.com/mcp",
+							oauth: { clientId: "registered-client" },
+						},
+					},
+				}),
+			)
+
+			const hub = new McpHub(mockProvider as ClineProvider, secretStorage)
+			await Promise.resolve()
+			await hub.dispose()
+			resolveProvider(mockAuthProvider)
+			await hub.waitUntilReady()
+
+			expect(mockAuthProvider.close).toHaveBeenCalledTimes(1)
+			expect(StreamableHTTPClientTransport).not.toHaveBeenCalled()
 		})
 	})
 
@@ -2669,7 +2790,7 @@ describe("McpHub", () => {
 		const serverName = "oauth-server"
 		const serverUrl = "https://example.com/mcp"
 		const source = "global" as const
-		const config = { url: serverUrl }
+		const config = ServerConfigSchema.parse({ type: "streamable-http", url: serverUrl })
 
 		let mockAuthProvider: any
 		let mockTransport: any
@@ -3053,6 +3174,30 @@ describe("McpHub", () => {
 				t("mcp:oauth.flow.cancelled"),
 			)
 			expect(mockAuthProvider.close).toHaveBeenCalled()
+		})
+
+		it("should close the provider when the hub is disposed during the initial token read", async () => {
+			let resolveTokenRead!: (value: null) => void
+			mockSecretStorage.getOAuthData.mockReturnValueOnce(
+				new Promise<null>((resolve) => {
+					resolveTokenRead = resolve
+				}),
+			)
+
+			const flowPromise = mcpHub["_initiateOAuthFlow"](
+				serverName,
+				source,
+				config,
+				mockAuthProvider,
+				mockTransport,
+				mockConnection,
+			)
+			mcpHub["isDisposed"] = true
+			resolveTokenRead(null)
+			await flowPromise
+
+			expect(mockAuthProvider.close).toHaveBeenCalledTimes(1)
+			expect(vsc.window.withProgress).not.toHaveBeenCalled()
 		})
 
 		it("should not reconnect when hub is disposed while cross-window tokens arrive", async () => {

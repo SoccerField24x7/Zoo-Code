@@ -723,6 +723,7 @@ export class McpHub {
 		// Set up file watchers for enabled servers
 		this.setupFileWatcher(name, config, source)
 
+		let pendingAuthProvider: McpOAuthClientProvider | undefined
 		try {
 			const client = new Client(
 				{
@@ -840,6 +841,11 @@ export class McpHub {
 					skipDiscovery,
 					...configInjected.oauth,
 				})
+				pendingAuthProvider = authProvider
+				if (this.isDisposed) {
+					await authProvider.close()
+					return
+				}
 
 				// Pre-register the OAuth client so the SDK can skip its own
 				// registration step (broken for path-prefixed issuers — see
@@ -991,6 +997,7 @@ export class McpHub {
 				authProvider: streamableHttpAuthProvider,
 			}
 			this.connections.push(connection)
+			pendingAuthProvider = undefined
 
 			// Connect (this will automatically start the transport)
 			try {
@@ -1045,6 +1052,7 @@ export class McpHub {
 			connection.server.resources = await this.fetchResourcesList(name, source)
 			connection.server.resourceTemplates = await this.fetchResourceTemplatesList(name, source)
 		} catch (error) {
+			await pendingAuthProvider?.close()
 			// Update status with error
 			const connection = this.findConnection(name, source)
 			if (connection) {
@@ -1104,6 +1112,7 @@ export class McpHub {
 		const existing = await this.secretStorage.getOAuthData(serverUrl, oauthClientId)
 		if (this.isDisposed) {
 			unsubscribeCrossWindow()
+			await authProvider.close()
 			return
 		}
 		// If the first read missed but the watcher fired during it, re-read — a write
