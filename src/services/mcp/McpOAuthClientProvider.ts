@@ -104,6 +104,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		private readonly _tokenEndpointAuthMethod: string,
 		private readonly _grantTypes: McpOAuthGrantType[],
 		private readonly _scopes: string[],
+		private readonly _scopeConfigured: boolean,
 		private readonly _state: string,
 		private readonly _authServerMeta: Record<string, any> | null,
 		private readonly _resourceIndicator: string | null,
@@ -154,10 +155,18 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		const authMethods: string[] = authServerMeta?.token_endpoint_auth_methods_supported ?? []
 		const tokenEndpointAuthMethod = authMethods.includes("none") ? "none" : "client_secret_post"
 		const grantTypes = selectMcpOAuthGrantTypes(authServerMeta?.grant_types_supported)
-		const scopes =
-			options?.scope !== undefined
-				? options.scope.split(/\s+/).filter((scope) => scope.length > 0)
-				: (authServerMeta?.scopes_supported ?? [])
+		const configuredScope = options?.scope
+		const scopeConfigured = configuredScope !== undefined
+		const scopes = scopeConfigured
+			? configuredScope.split(/\s+/).filter((scope) => scope.length > 0)
+			: (authServerMeta?.scopes_supported ?? [])
+
+		const storedData = await secretStorage.getOAuthData(serverUrl, options?.clientId)
+		const issuerMatches = typeof storedData?.issuer === "string" && storedData.issuer === authServerMeta?.issuer
+		const storedResourceIndicator =
+			!resourceIndicator && options?.resource !== false && issuerMatches
+				? storedData?.resource_indicator
+				: undefined
 
 		// Generate a CSRF state token for the OAuth flow.
 		const state = Array.from(crypto.getRandomValues(new Uint8Array(16)))
@@ -177,6 +186,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 			tokenEndpointAuthMethod,
 			grantTypes,
 			scopes,
+			scopeConfigured,
 			state,
 			authServerMeta,
 			resourceIndicator,
@@ -185,6 +195,9 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 			options?.redirectUri,
 			options?.clientId,
 		)
+		if (storedResourceIndicator) {
+			provider._effectiveResourceIndicator = storedResourceIndicator
+		}
 
 		if (options?.clientId) {
 			if (options.redirectUri) {
@@ -335,6 +348,12 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 				await this._secretStorage.deleteOAuthData(this._serverUrl, this._configuredClientId)
 				return undefined
 			}
+
+			// Restore the authorization resource after a restart only when the current
+			// configuration or discovery did not already select one.
+			if (!this._effectiveResourceIndicator && !this._resourceDisabled) {
+				this._effectiveResourceIndicator = data.resource_indicator ?? null
+			}
 			if (this._refreshPromise) {
 				return this._refreshPromise
 			}
@@ -376,6 +395,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 				tokens,
 				expires_at,
 				...(this._authServerMeta?.issuer ? { issuer: this._authServerMeta.issuer as string } : {}),
+				...(this._effectiveResourceIndicator ? { resource_indicator: this._effectiveResourceIndicator } : {}),
 				...(clientInfo ? { client_info: clientInfo } : {}),
 			},
 			this._configuredClientId,
@@ -395,8 +415,8 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		// with path components, causing it to fall back to a default "/authorize" path.
 		// We correct the URL using our pre-fetched metadata:
 		//  1. Replace the origin+pathname with the real authorization_endpoint.
-		//  2. Preserve all SDK-generated query params (client_id, code_challenge, etc.)
-		//  3. Add `scope` when the server advertises scopes but the SDK omitted it.
+		//  2. Preserve all SDK-generated query params (client_id, code_challenge, etc.).
+		//  3. Override SDK scopes when the configuration explicitly supplies a scope.
 		//  4. Set an explicit or discovered RFC 8707 `resource` parameter. Preserve
 		//     an SDK-generated value unless the configuration disables it.
 		if (this._resourceIndicator) {
@@ -406,7 +426,12 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 			authorizationUrl.searchParams.delete("resource")
 			this._effectiveResourceIndicator = null
 		} else {
-			this._effectiveResourceIndicator = authorizationUrl.searchParams.get("resource")
+			const sdkResourceIndicator = authorizationUrl.searchParams.get("resource")
+			if (sdkResourceIndicator) {
+				this._effectiveResourceIndicator = sdkResourceIndicator
+			} else if (this._effectiveResourceIndicator) {
+				authorizationUrl.searchParams.set("resource", this._effectiveResourceIndicator)
+			}
 		}
 		let correctedUrl = authorizationUrl
 		if (this._authServerMeta?.authorization_endpoint) {
@@ -427,14 +452,20 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 				authorizationUrl.searchParams.forEach((value, key) => {
 					fixed.searchParams.set(key, value)
 				})
-				// Ensure the scope param is present — the SDK sometimes omits it
-				if (!fixed.searchParams.has("scope") && this._scopes.length > 0) {
-					fixed.searchParams.set("scope", this._scopes.join(" "))
-				}
 				correctedUrl = fixed
 			} catch {
 				// Fall through and use the original URL if correction fails
 			}
+		}
+
+		if (this._scopeConfigured) {
+			if (this._scopes.length > 0) {
+				correctedUrl.searchParams.set("scope", this._scopes.join(" "))
+			} else {
+				correctedUrl.searchParams.delete("scope")
+			}
+		} else if (!correctedUrl.searchParams.has("scope") && this._scopes.length > 0) {
+			correctedUrl.searchParams.set("scope", this._scopes.join(" "))
 		}
 
 		// Store the (possibly corrected) URL; it will be opened by openBrowser()

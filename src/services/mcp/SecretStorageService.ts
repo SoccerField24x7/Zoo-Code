@@ -11,6 +11,11 @@ export interface StoredMcpOAuthData {
 	 */
 	issuer?: string
 	/**
+	 * RFC 8707 resource used during authorization and token requests. This keeps
+	 * refresh requests consistent after the extension restarts.
+	 */
+	resource_indicator?: string
+	/**
 	 * Full DCR response from the auth server, persisted so that fields like
 	 * client_secret, grant_types, and token_endpoint_auth_method survive restarts.
 	 * Note: redirect_uris within this object may be stale (port changes between

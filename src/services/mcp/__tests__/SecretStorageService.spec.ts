@@ -164,10 +164,11 @@ describe("SecretStorageService", () => {
 	})
 
 	describe("client_info round-trip", () => {
-		it("should persist and retrieve full client_info", async () => {
+		it("should persist and retrieve full client_info and resource indicator", async () => {
 			const data: StoredMcpOAuthData = {
 				tokens: { access_token: "tok", token_type: "Bearer" },
 				expires_at: Date.now() + 3600_000,
+				resource_indicator: "https://api.example.com/",
 				client_info: {
 					client_id: "cid-123",
 					client_secret: "secret-456",
@@ -182,6 +183,7 @@ describe("SecretStorageService", () => {
 
 			const result = await service.getOAuthData("https://example.com/mcp")
 			expect(result).toEqual(data)
+			expect(result?.resource_indicator).toBe("https://api.example.com/")
 			expect(result?.client_info?.client_id).toBe("cid-123")
 			expect(result?.client_info?.client_secret).toBe("secret-456")
 			expect(result?.client_info?.token_endpoint_auth_method).toBe("client_secret_post")
