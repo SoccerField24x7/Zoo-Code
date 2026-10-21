@@ -1481,7 +1481,7 @@
 	},
 	"services/mcp/McpHub.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 8
+			"count": 7
 		}
 	},
 	"services/mcp/McpOAuthClientProvider.ts": {

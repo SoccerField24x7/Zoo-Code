@@ -168,6 +168,50 @@ describe("McpOAuthClientProvider", () => {
 			expect(provider.hasMetadata).toBe(false)
 			expect(McpOAuthClientProvider.isKnownNonOAuth("https://no-oauth.example.com/mcp")).toBe(true)
 		})
+		it("should initialize a static client with configured scopes and callback", async () => {
+			setupCallbackServerMock()
+			const provider = await McpOAuthClientProvider.create(
+				"https://example.com/mcp",
+				createMockSecretStorage(),
+				undefined,
+				{
+					clientId: "registered-client",
+					scope: "openid  profile offline_access",
+					redirectUri: "http://localhost:33418/callback",
+					resource: false,
+				},
+			)
+
+			expect(await provider.clientInformation()).toMatchObject({
+				client_id: "registered-client",
+				redirect_uris: ["http://localhost:33418/callback"],
+				token_endpoint_auth_method: "none",
+			})
+			expect(provider.redirectUrl).toBe("http://localhost:33418/callback")
+
+			await provider.redirectToAuthorization(
+				new URL("https://auth.example.com/authorize?client_id=registered-client"),
+			)
+			await provider.openBrowser()
+			const openedUri = vi.mocked(vscode.env.openExternal).mock.calls[0][0].toString()
+			expect(new URL(openedUri).searchParams.get("scope")).toBe("openid profile offline_access")
+			expect(startCallbackServer).toHaveBeenCalledWith(33418, expect.any(String))
+			await provider.close()
+		})
+
+		it.each([
+			"https://example.com:33418/callback",
+			"https://localhost:33418/callback",
+			"http://localhost:33418/wrong",
+			"http://localhost/callback",
+		])("should reject unsafe or unusable configured callback %s", async (redirectUri) => {
+			await expect(
+				McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage(), undefined, {
+					clientId: "registered-client",
+					redirectUri,
+				}),
+			).rejects.toThrow(/MCP OAuth redirectUri/)
+		})
 	})
 
 	describe("redirectUrl (pre-server-start)", () => {
@@ -590,6 +634,45 @@ describe("McpOAuthClientProvider", () => {
 			expect(scopeMatches).toBe(1)
 			await provider.close()
 		})
+		it("should omit an SDK resource parameter when resource is false", async () => {
+			setupCallbackServerMock()
+			const provider = await McpOAuthClientProvider.create(
+				"https://example.com/mcp",
+				createMockSecretStorage(),
+				undefined,
+				{ clientId: "registered-client", resource: false },
+			)
+
+			const sdkUrl = new URL(
+				"https://auth.example.com/authorize?client_id=registered-client&resource=https%3A%2F%2Fexample.com%2F",
+			)
+			await provider.redirectToAuthorization(sdkUrl)
+			await provider.openBrowser()
+
+			const openedUri = vi.mocked(vscode.env.openExternal).mock.calls[0][0].toString()
+			expect(new URL(openedUri).searchParams.has("resource")).toBe(false)
+			await provider.close()
+		})
+
+		it("should replace the SDK resource parameter with an explicit configured value", async () => {
+			setupCallbackServerMock()
+			const provider = await McpOAuthClientProvider.create(
+				"https://example.com/mcp",
+				createMockSecretStorage(),
+				undefined,
+				{ clientId: "registered-client", resource: "https://api.example.com/" },
+			)
+
+			const sdkUrl = new URL(
+				"https://auth.example.com/authorize?client_id=registered-client&resource=https%3A%2F%2Fexample.com%2F",
+			)
+			await provider.redirectToAuthorization(sdkUrl)
+			await provider.openBrowser()
+
+			const openedUri = vi.mocked(vscode.env.openExternal).mock.calls[0][0].toString()
+			expect(new URL(openedUri).searchParams.get("resource")).toBe("https://api.example.com/")
+			await provider.close()
+		})
 	})
 
 	describe("exchangeCodeForTokens", () => {
@@ -652,6 +735,43 @@ describe("McpOAuthClientProvider", () => {
 			const saved = await provider.tokens()
 			expect(saved).toEqual(tokenResponse)
 
+			await provider.close()
+		})
+
+		it("should use the static client callback and omit resource when disabled", async () => {
+			const tokenResponse = { access_token: "access-token", token_type: "Bearer", expires_in: 3600 }
+			mockFetch
+				.mockResolvedValueOnce({
+					ok: true,
+					json: () =>
+						Promise.resolve({
+							issuer: "https://auth.example.com",
+							authorization_endpoint: "https://auth.example.com/authorize",
+							token_endpoint: "https://auth.example.com/token",
+							token_endpoint_auth_methods_supported: ["none"],
+							grant_types_supported: ["authorization_code", "refresh_token"],
+						}),
+				})
+				.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(tokenResponse) })
+			const provider = await McpOAuthClientProvider.create(
+				"https://example.com/mcp",
+				createMockSecretStorage(),
+				undefined,
+				{
+					clientId: "registered-client",
+					redirectUri: "http://localhost:33418/callback",
+					resource: false,
+				},
+			)
+			await provider.saveCodeVerifier("verifier")
+
+			await provider.exchangeCodeForTokens("authorization-code")
+
+			const tokenCall = mockFetch.mock.calls.at(-1)
+			const body = new URLSearchParams(tokenCall?.[1]?.body as string)
+			expect(body.get("client_id")).toBe("registered-client")
+			expect(body.get("redirect_uri")).toBe("http://localhost:33418/callback")
+			expect(body.has("resource")).toBe(false)
 			await provider.close()
 		})
 
@@ -801,6 +921,21 @@ describe("McpOAuthClientProvider", () => {
 	})
 
 	describe("registerClientIfNeeded", () => {
+		it("should skip dynamic registration for a configured static client", async () => {
+			const provider = await McpOAuthClientProvider.create(
+				"https://example.com/mcp",
+				createMockSecretStorage(),
+				undefined,
+				{ clientId: "registered-client" },
+			)
+			mockFetch.mockClear()
+
+			await provider.registerClientIfNeeded()
+
+			expect(mockFetch).not.toHaveBeenCalled()
+			expect((await provider.clientInformation())?.client_id).toBe("registered-client")
+		})
+
 		it("should reuse cached client_info from previous registration", async () => {
 			setupCallbackServerMock()
 			const secretStorage = createMockSecretStorage()

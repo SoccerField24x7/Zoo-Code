@@ -1691,6 +1691,48 @@ describe("McpHub", () => {
 			)
 		})
 
+		describe("static OAuth configuration", () => {
+			it("accepts static OAuth settings for streamable HTTP", () => {
+				const result = ServerConfigSchema.parse({
+					type: "streamable-http",
+					url: "https://mcp.example.com/mcp",
+					oauth: {
+						clientId: "registered-client",
+						scope: "openid profile offline_access",
+						redirectUri: "http://localhost:33418/callback",
+						resource: false,
+					},
+				})
+
+				expect(result.oauth).toEqual({
+					clientId: "registered-client",
+					scope: "openid profile offline_access",
+					redirectUri: "http://localhost:33418/callback",
+					resource: false,
+				})
+			})
+
+			it("accepts a static client without other OAuth settings", () => {
+				const result = ServerConfigSchema.parse({
+					type: "streamable-http",
+					url: "https://mcp.example.com/mcp",
+					oauth: { clientId: "registered-client" },
+				})
+
+				expect(result.oauth).toEqual({ clientId: "registered-client" })
+			})
+
+			it.each([
+				{ type: "stdio", command: "test", oauth: { clientId: "client" } },
+				{ type: "sse", url: "https://mcp.example.com/sse", oauth: { clientId: "client" } },
+				{ type: "streamable-http", url: "https://mcp.example.com/mcp", oauth: { clientId: "" } },
+				{ type: "streamable-http", url: "https://mcp.example.com/mcp", oauth: { resource: "invalid" } },
+				{ type: "streamable-http", url: "https://mcp.example.com/mcp", oauth: { resource: false } },
+			])("rejects invalid OAuth configuration: $type", (config) => {
+				expect(() => ServerConfigSchema.parse(config)).toThrow()
+			})
+		})
+
 		describe("timeout configuration", () => {
 			it("should validate timeout values", () => {
 				// Test valid timeout values

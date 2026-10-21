@@ -234,5 +234,25 @@ describe("SecretStorageService", () => {
 				expect((await service.getOAuthData(url))?.tokens.access_token).toBe(`tok-${i}`)
 			}
 		})
+		it("should isolate static OAuth clients for the same server URL", async () => {
+			await service.saveOAuthData(
+				"https://example.com/mcp",
+				{ tokens: { access_token: "client-a-token", token_type: "Bearer" }, expires_at: 1 },
+				"client-a",
+			)
+			await service.saveOAuthData(
+				"https://example.com/mcp",
+				{ tokens: { access_token: "client-b-token", token_type: "Bearer" }, expires_at: 2 },
+				"client-b",
+			)
+
+			expect((await service.getOAuthData("https://example.com/mcp", "client-a"))?.tokens.access_token).toBe(
+				"client-a-token",
+			)
+			expect((await service.getOAuthData("https://example.com/mcp", "client-b"))?.tokens.access_token).toBe(
+				"client-b-token",
+			)
+			expect(await service.getOAuthData("https://example.com/mcp")).toBeUndefined()
+		})
 	})
 })
