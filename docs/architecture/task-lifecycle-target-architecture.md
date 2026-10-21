@@ -229,7 +229,7 @@ Queued user input is out of scope for the kernel. The queued-input bugs (#1308, 
 7. Abort drain. The chunk loop sees `abort`. If the task is not abandoned, the loop calls `abortStream` (`Task.ts:3492`). Only a non-abandoned abort reaches this call, for example a checkpoint-restore delete or a dispose. `abortStream` sets `didFinishAbortingStream` (`Task.ts:3225`). The `finally` block clears `isStreaming` (`Task.ts:3756`).
 8. Stream failure. A stream error without `abort` also calls `abortStream("streaming_failed")` (`Task.ts:3714`), which sets `didFinishAbortingStream` (`Task.ts:3225`). Then the loop retries. It does not abort. The per-request reset block (`Task.ts:3228-3245`) does not reset `didFinishAbortingStream`. Only `resumeAfterDelegation` resets it (`Task.ts:2884`). So the field stays true across later requests (race R-1 below).
 9. Completion. `attempt_completion` asks `completion_result` during the turn (`AttemptCompletionTool.ts:221`). The ask is usually still pending after the stream ends. On accept the task ends. On feedback the loop continues.
-10. New instance. `reopenParentFromDelegation` builds a new instance and calls `resumeAfterDelegation` (`ClineProvider.ts:4357, 4404`). Latches are per instance. No path reuses an aborted instance. The resets at `Task.ts:2881-2886` write the default values on the new instance.
+10. New instance. `reopenParentFromDelegation` builds a new instance and calls `resumeAfterDelegation` (`ClineProvider.ts:4357, 4404`). Latches are per instance. No path reuses an aborted instance. `resumeAfterDelegation` no longer resets the latches. It resets only the stream fields (`Task.ts:2884-2886`).
 
 #### Transitions
 
