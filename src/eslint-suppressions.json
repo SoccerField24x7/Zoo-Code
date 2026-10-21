@@ -1501,7 +1501,7 @@
 	},
 	"services/mcp/__tests__/McpOAuthClientProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 19
+			"count": 18
 		}
 	},
 	"services/mcp/__tests__/SecretStorageService.spec.ts": {

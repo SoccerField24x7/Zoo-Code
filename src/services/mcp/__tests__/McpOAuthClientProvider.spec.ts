@@ -48,7 +48,7 @@ mockFetch.mockResolvedValue({
 })
 
 import { McpOAuthClientProvider } from "../McpOAuthClientProvider"
-import { SecretStorageService } from "../SecretStorageService"
+import { SecretStorageService, StoredMcpOAuthData } from "../SecretStorageService"
 import { startCallbackServer, stopCallbackServer } from "../utils/callbackServer"
 import { discoverOAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/client/auth.js"
 import * as vscode from "vscode"
@@ -61,7 +61,7 @@ function createMockSecretStorage(): SecretStorageService {
 			const raw = store.get(key(url, clientId))
 			return raw ? JSON.parse(raw) : undefined
 		}),
-		saveOAuthData: vi.fn(async (url: string, data: any, clientId?: string) => {
+		saveOAuthData: vi.fn(async (url: string, data: StoredMcpOAuthData, clientId?: string) => {
 			store.set(key(url, clientId), JSON.stringify(data))
 		}),
 		deleteOAuthData: vi.fn(async (url: string, clientId?: string) => {
@@ -875,13 +875,13 @@ describe("McpOAuthClientProvider", () => {
 			await provider.close()
 		})
 
-		it("should replace an SDK scope with the configured static scope", async () => {
+		it("should normalize and replace an SDK scope with the configured static scope", async () => {
 			setupCallbackServerMock()
 			const provider = await McpOAuthClientProvider.create(
 				"https://example.com/mcp",
 				createMockSecretStorage(),
 				undefined,
-				{ clientId: "registered-client", scope: "openid offline_access" },
+				{ clientId: "registered-client", scope: " openid \t offline_access " },
 			)
 
 			await provider.redirectToAuthorization(
@@ -891,6 +891,41 @@ describe("McpOAuthClientProvider", () => {
 
 			const openedUri = vi.mocked(vscode.env.openExternal).mock.calls[0][0].toString()
 			expect(new URL(openedUri).searchParams.get("scope")).toBe("openid offline_access")
+			await provider.close()
+		})
+
+		it("should use advertised scopes for a static client when scope is not configured", async () => {
+			setupCallbackServerMock()
+			vi.mocked(discoverOAuthProtectedResourceMetadata).mockResolvedValueOnce({
+				resource: "https://example.com/",
+				authorization_servers: ["https://auth.example.com"],
+			})
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						issuer: "https://auth.example.com",
+						authorization_endpoint: "https://auth.example.com/authorize",
+						token_endpoint: "https://auth.example.com/token",
+						token_endpoint_auth_methods_supported: ["none"],
+						grant_types_supported: ["authorization_code"],
+						scopes_supported: ["openid", "profile"],
+					}),
+			})
+			const provider = await McpOAuthClientProvider.create(
+				"https://example.com/mcp",
+				createMockSecretStorage(),
+				undefined,
+				{ clientId: "registered-client" },
+			)
+
+			await provider.redirectToAuthorization(
+				new URL("https://auth.example.com/authorize?client_id=registered-client"),
+			)
+			await provider.openBrowser()
+
+			const openedUri = vi.mocked(vscode.env.openExternal).mock.calls[0][0].toString()
+			expect(new URL(openedUri).searchParams.get("scope")).toBe("openid profile")
 			await provider.close()
 		})
 
@@ -912,6 +947,35 @@ describe("McpOAuthClientProvider", () => {
 			expect(new URL(openedUri).searchParams.has("scope")).toBe(false)
 			await provider.close()
 		})
+
+		it("should omit a stored resource from another issuer during authorization", async () => {
+			setupCallbackServerMock()
+			const secretStorage = createMockSecretStorage()
+			const serverUrl = "https://example.com/mcp"
+			const clientId = "registered-client"
+			await secretStorage.saveOAuthData(
+				serverUrl,
+				{
+					tokens: { access_token: "access-token", token_type: "Bearer" },
+					expires_at: Date.now() + 3600_000,
+					issuer: "https://other.example.com",
+					resource_indicator: "https://stored.example.com/",
+				},
+				clientId,
+			)
+			mockOAuthDiscovery()
+			const provider = await McpOAuthClientProvider.create(serverUrl, secretStorage, undefined, { clientId })
+
+			await provider.redirectToAuthorization(
+				new URL("https://auth.example.com/authorize?client_id=registered-client"),
+			)
+			await provider.openBrowser()
+
+			const openedUri = vi.mocked(vscode.env.openExternal).mock.calls[0][0].toString()
+			expect(new URL(openedUri).searchParams.has("resource")).toBe(false)
+			await provider.close()
+		})
+
 		it("should omit an SDK resource parameter when resource is false", async () => {
 			setupCallbackServerMock()
 			const provider = await McpOAuthClientProvider.create(
