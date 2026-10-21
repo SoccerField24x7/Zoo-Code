@@ -89,6 +89,8 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 	private _refreshPromise: Promise<OAuthTokens> | null = null
 	/** Stored by redirectToAuthorization(); opened on-demand via openBrowser(). */
 	private _pendingAuthorizationUrl: URL | null = null
+	/** Resource used by the authorization request and subsequent token requests. */
+	private _effectiveResourceIndicator: string | null
 	/** Deduplicates concurrent _ensureCallbackServer() calls. */
 	private _ensureServerPromise: Promise<void> | null = null
 
@@ -109,7 +111,9 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		private readonly _clientName: string,
 		private readonly _configuredRedirectUri?: string,
 		private readonly _configuredClientId?: string,
-	) {}
+	) {
+		this._effectiveResourceIndicator = _resourceIndicator
+	}
 
 	/**
 	 * Factory — discovers OAuth Authorization Server metadata once (RFC 9728 +
@@ -184,7 +188,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 
 		if (options?.clientId) {
 			if (options.redirectUri) {
-				getCallbackPort(options.redirectUri)
+				getCallbackAddress(options.redirectUri)
 			} else {
 				// A static client skips DCR, which normally starts the callback server.
 				// Start it here so the SDK never receives localhost:0 as redirect_uri.
@@ -226,9 +230,11 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 
 	private async _doStartCallbackServer(): Promise<void> {
 		this._closed = false
+		const { port: configuredPort, host } = getCallbackAddress(this._configuredRedirectUri)
 		const { server, port, result, cancel } = await startCallbackServer(
-			getCallbackPort(this._configuredRedirectUri) ?? this._port,
+			configuredPort ?? this._port,
 			this._state,
+			host,
 		)
 		this._server = server
 		this._port = port
@@ -395,8 +401,12 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		//     an SDK-generated value unless the configuration disables it.
 		if (this._resourceIndicator) {
 			authorizationUrl.searchParams.set("resource", this._resourceIndicator)
+			this._effectiveResourceIndicator = this._resourceIndicator
 		} else if (this._resourceDisabled) {
 			authorizationUrl.searchParams.delete("resource")
+			this._effectiveResourceIndicator = null
+		} else {
+			this._effectiveResourceIndicator = authorizationUrl.searchParams.get("resource")
 		}
 		let correctedUrl = authorizationUrl
 		if (this._authServerMeta?.authorization_endpoint) {
@@ -508,8 +518,8 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 
 		// RFC 8707: include resource indicator so servers that bind token requests
 		// to a specific resource can validate the exchange.
-		if (this._resourceIndicator) {
-			params.resource = this._resourceIndicator
+		if (this._effectiveResourceIndicator) {
+			params.resource = this._effectiveResourceIndicator
 		}
 
 		// Include client_secret in the body when the auth method is client_secret_post.
@@ -560,8 +570,8 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		}
 
 		// RFC 8707: include resource indicator in refresh requests too.
-		if (this._resourceIndicator) {
-			params.resource = this._resourceIndicator
+		if (this._effectiveResourceIndicator) {
+			params.resource = this._effectiveResourceIndicator
 		}
 
 		if (this._tokenEndpointAuthMethod === "client_secret_post" && this._clientInfo?.client_secret) {
@@ -610,8 +620,8 @@ function resolveResourceIndicator(configured: McpOAuthResource | undefined, disc
 	return discovered ?? null
 }
 
-function getCallbackPort(redirectUri?: string): number | undefined {
-	if (!redirectUri) return undefined
+function getCallbackAddress(redirectUri?: string): { port?: number; host: "localhost" | "127.0.0.1" } {
+	if (!redirectUri) return { host: "localhost" }
 	const url = new URL(redirectUri)
 	if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
 		throw new Error("MCP OAuth redirectUri must use a loopback host")
@@ -629,5 +639,5 @@ function getCallbackPort(redirectUri?: string): number | undefined {
 	if (!Number.isInteger(port) || port < 1 || port > 65535) {
 		throw new Error("MCP OAuth redirectUri must specify a valid port")
 	}
-	return port
+	return { port, host: url.hostname }
 }
