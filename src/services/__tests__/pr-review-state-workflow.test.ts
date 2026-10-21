@@ -1371,10 +1371,17 @@ describe("PR review-state workflow", () => {
 
 	// Issue #2089 steps 3-4: the conflict flag is independent of the turn
 	// labels, and a conflicted PR always owes the author action. A known dirty
-	// read therefore sets has-conflicts and awaiting-author together, and a
-	// consecutive run with the same dirty read rewrites neither.
+	// read therefore sets has-conflicts and awaiting-author together. The
+	// shared-state harness carries run 1's actual writes into run 2, which
+	// then rewrites neither label.
 	it("carries awaiting-author and has-conflicts together, stable across consecutive runs (#2089)", async () => {
+		const sharedState: SharedState = {
+			labels: new Set(["awaiting-maintainer"]),
+			guide: { body: null },
+			gate: { status: null },
+		}
 		const first = await runWorkflow({
+			sharedState,
 			conflict: true,
 			labels: ["awaiting-maintainer"],
 		})
@@ -1382,15 +1389,52 @@ describe("PR review-state workflow", () => {
 		expect(first.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 		expect(first.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
 		expect(first.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		// Run 2 starts from run 1's real label state, not a hand-written copy.
+		expect([...sharedState.labels].sort()).toEqual(["awaiting-author", "has-conflicts"])
 
 		const second = await runWorkflow({
+			sharedState,
 			conflict: true,
-			labels: ["awaiting-author", "has-conflicts"],
+			labels: [...sharedState.labels],
 		})
 
 		expect(second.addLabels).not.toHaveBeenCalled()
 		expect(second.removeLabel).not.toHaveBeenCalled()
 		expect(second.setFailed).not.toHaveBeenCalled()
+	})
+
+	// Issue #2089: a 404 on the flag removal means the label vanished between
+	// the read and the write. The removal goal is already met, so the run
+	// tolerates the 404 and keeps reconciling instead of failing closed.
+	it("tolerates a 404 when removing the has-conflicts flag on a known clean read (#2089)", async () => {
+		const result = await runWorkflow({
+			labels: ["has-conflicts"],
+			removeLabelStatus: 404,
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "has-conflicts" }))
+		expect(result.setFailed).not.toHaveBeenCalled()
+		// The turn-label reconcile still runs after the tolerated removal.
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+	})
+
+	// Issue #2089: the conflict-flag reconcile must honor the fork read-only
+	// guard in both directions. A dirty read wants to add the flag. A clean
+	// read with the flag present wants to remove it. The guard returns early;
+	// it is not a failure, so the run writes nothing and still succeeds.
+	it.each([
+		{ name: "known dirty read with the flag absent", options: { conflict: true } },
+		{ name: "known clean read with the flag present", options: { labels: ["has-conflicts"] } },
+	])("skips the has-conflicts reconcile for a fork PR on a read-only run: $name (#2089)", async ({ options }) => {
+		const result = await runWorkflow({
+			...options,
+			eventName: "pull_request_review",
+			fork: true,
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(result.removeLabel).not.toHaveBeenCalled()
+		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
 	// Issue #2089 step 3: a known read that is not dirty removes the conflict
