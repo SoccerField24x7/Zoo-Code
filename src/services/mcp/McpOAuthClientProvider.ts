@@ -105,6 +105,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		private readonly _state: string,
 		private readonly _authServerMeta: Record<string, any> | null,
 		private readonly _resourceIndicator: string | null,
+		private readonly _resourceDisabled: boolean,
 		private readonly _clientName: string,
 		private readonly _configuredRedirectUri?: string,
 		private readonly _configuredClientId?: string,
@@ -175,6 +176,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 			state,
 			authServerMeta,
 			resourceIndicator,
+			options?.resource === false,
 			serverName || "Roo Code",
 			options?.redirectUri,
 			options?.clientId,
@@ -389,11 +391,11 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		//  1. Replace the origin+pathname with the real authorization_endpoint.
 		//  2. Preserve all SDK-generated query params (client_id, code_challenge, etc.)
 		//  3. Add `scope` when the server advertises scopes but the SDK omitted it.
-		//  4. Add RFC 8707 `resource` parameter when the protected resource metadata
-		//     advertised a resource indicator.
+		//  4. Set an explicit or discovered RFC 8707 `resource` parameter. Preserve
+		//     an SDK-generated value unless the configuration disables it.
 		if (this._resourceIndicator) {
 			authorizationUrl.searchParams.set("resource", this._resourceIndicator)
-		} else {
+		} else if (this._resourceDisabled) {
 			authorizationUrl.searchParams.delete("resource")
 		}
 		let correctedUrl = authorizationUrl

@@ -602,20 +602,23 @@ describe("McpOAuthClientProvider", () => {
 			await provider.close()
 		})
 
-		it("should not duplicate resource if the SDK already included it", async () => {
+		it("should preserve an SDK resource when provider discovery finds no resource", async () => {
+			;(discoverOAuthProtectedResourceMetadata as any).mockResolvedValueOnce({
+				authorization_servers: ["https://auth.example.com"],
+			})
 			setupCallbackServerMock()
 			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage())
 
-			// SDK URL already contains a resource param
 			const sdkUrl = new URL(
 				"https://auth.example.com/authorize?client_id=abc&resource=https%3A%2F%2Fexample.com%2F&state=123",
 			)
 			await provider.redirectToAuthorization(sdkUrl)
 			await provider.openBrowser()
 
-			const openedUri = (vscode.env.openExternal as any).mock.calls[0][0].toString()
-			const resourceMatches = (openedUri.match(/resource=/g) || []).length
-			expect(resourceMatches).toBe(1)
+			const openedUri = vi.mocked(vscode.env.openExternal).mock.calls[0][0].toString()
+			const openedUrl = new URL(openedUri)
+			expect(openedUrl.searchParams.get("resource")).toBe("https://example.com/")
+			expect(openedUrl.searchParams.getAll("resource")).toHaveLength(1)
 			await provider.close()
 		})
 

@@ -1726,7 +1726,16 @@ describe("McpHub", () => {
 				{ type: "stdio", command: "test", oauth: { clientId: "client" } },
 				{ type: "sse", url: "https://mcp.example.com/sse", oauth: { clientId: "client" } },
 				{ type: "streamable-http", url: "https://mcp.example.com/mcp", oauth: { clientId: "" } },
-				{ type: "streamable-http", url: "https://mcp.example.com/mcp", oauth: { resource: "invalid" } },
+				{
+					type: "streamable-http",
+					url: "https://mcp.example.com/mcp",
+					oauth: { clientId: "client", resource: "invalid" },
+				},
+				{
+					type: "streamable-http",
+					url: "https://mcp.example.com/mcp",
+					oauth: { clientId: "client", resource: true },
+				},
 				{ type: "streamable-http", url: "https://mcp.example.com/mcp", oauth: { resource: false } },
 			])("rejects invalid OAuth configuration: $type", (config) => {
 				expect(() => ServerConfigSchema.parse(config)).toThrow()
