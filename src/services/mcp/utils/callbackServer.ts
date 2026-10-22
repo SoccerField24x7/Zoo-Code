@@ -24,7 +24,7 @@ type CallbackHost = "localhost" | "127.0.0.1"
 export function startCallbackServer(
 	port?: number,
 	expectedState?: string,
-	host: CallbackHost = "localhost",
+	host: CallbackHost = "127.0.0.1",
 ): Promise<{
 	server: http.Server
 	port: number

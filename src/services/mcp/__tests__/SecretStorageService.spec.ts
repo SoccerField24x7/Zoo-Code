@@ -236,6 +236,27 @@ describe("SecretStorageService", () => {
 				expect((await service.getOAuthData(url))?.tokens.access_token).toBe(`tok-${i}`)
 			}
 		})
+
+		it("should not collide between a static root client ID and a legacy dynamic path", async () => {
+			await service.saveOAuthData(
+				"https://example.test/",
+				{ tokens: { access_token: "static-token", token_type: "Bearer" }, expires_at: 1 },
+				"/mcp",
+			)
+
+			expect(await service.getOAuthData("https://example.test/mcp")).toBeUndefined()
+
+			await service.saveOAuthData("https://example.test/mcp", {
+				tokens: { access_token: "dynamic-token", token_type: "Bearer" },
+				expires_at: 2,
+			})
+
+			expect((await service.getOAuthData("https://example.test/", "/mcp"))?.tokens.access_token).toBe(
+				"static-token",
+			)
+			expect((await service.getOAuthData("https://example.test/mcp"))?.tokens.access_token).toBe("dynamic-token")
+		})
+
 		it("should isolate static OAuth clients for the same server URL", async () => {
 			await service.saveOAuthData(
 				"https://example.com/mcp",

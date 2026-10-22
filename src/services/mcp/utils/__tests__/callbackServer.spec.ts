@@ -46,7 +46,7 @@ describe("startCallbackServer", () => {
 
 		expect(port).toBe(3000)
 		expect(server).toBe(mockServer)
-		expect(mockServer.listen).toHaveBeenCalledWith(0, "localhost", expect.any(Function))
+		expect(mockServer.listen).toHaveBeenCalledWith(0, "127.0.0.1", expect.any(Function))
 
 		// Simulate callback request
 		const requestCall = mockServer.on.mock.calls.find((call) => call[0] === "request")
@@ -71,16 +71,16 @@ describe("startCallbackServer", () => {
 		expect(mockRes.end).toHaveBeenCalledWith(expect.stringContaining('<meta charset="utf-8">'))
 	})
 
-	it("should bind to the configured loopback host", async () => {
+	it.each(["localhost", "127.0.0.1"] as const)("should bind to the configured loopback host %s", async (host) => {
 		const mockServer = createMockServer()
 
 		vi.mocked(http.createServer).mockReturnValue(mockServer as unknown as http.Server)
 
-		const { result, cancel } = await startCallbackServer(33418, undefined, "127.0.0.1")
+		const { result, cancel } = await startCallbackServer(33418, undefined, host)
 		const cancellation = expect(result).rejects.toThrow("Callback cancelled")
 		cancel()
 
-		expect(mockServer.listen).toHaveBeenCalledWith(33418, "127.0.0.1", expect.any(Function))
+		expect(mockServer.listen).toHaveBeenCalledWith(33418, host, expect.any(Function))
 		await cancellation
 	})
 

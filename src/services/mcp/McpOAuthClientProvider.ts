@@ -204,7 +204,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 				getCallbackAddress(options.redirectUri)
 			} else {
 				// A static client skips DCR, which normally starts the callback server.
-				// Start it here so the SDK never receives localhost:0 as redirect_uri.
+				// Start it here so the SDK never receives port 0 as redirect_uri.
 				await provider._ensureCallbackServer()
 			}
 			provider._clientInfo = {
@@ -225,7 +225,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 	}
 
 	get redirectUrl(): string {
-		return this._configuredRedirectUri ?? `http://localhost:${this._port}/callback`
+		return this._configuredRedirectUri ?? `http://127.0.0.1:${this._port}/callback`
 	}
 
 	private _ensureCallbackServer(): Promise<void> {
@@ -656,7 +656,7 @@ function resolveResourceIndicator(configured: McpOAuthResource | undefined, disc
 }
 
 function getCallbackAddress(redirectUri?: string): { port?: number; host: "localhost" | "127.0.0.1" } {
-	if (!redirectUri) return { host: "localhost" }
+	if (!redirectUri) return { host: "127.0.0.1" }
 	const url = new URL(redirectUri)
 	if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
 		throw new Error("MCP OAuth redirectUri must use a loopback host")

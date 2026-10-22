@@ -155,7 +155,7 @@ describe("McpOAuthClientProvider", () => {
 			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", secretStorage)
 
 			expect(startCallbackServer).not.toHaveBeenCalled()
-			expect(provider.redirectUrl).toBe("http://localhost:0/callback")
+			expect(provider.redirectUrl).toBe("http://127.0.0.1:0/callback")
 			await provider.close()
 		})
 
@@ -226,28 +226,32 @@ describe("McpOAuthClientProvider", () => {
 		)
 
 		it.each([
-			"https://example.com:33418/callback",
-			"https://localhost:33418/callback",
-			"http://localhost:33418/wrong",
-			"http://localhost/callback",
-		])("should reject unsafe or unusable configured callback %s", async (redirectUri) => {
+			["https://example.com:33418/callback", "must use a loopback host"],
+			["http://example.com:33418/callback", "must use a loopback host"],
+			["https://localhost:33418/callback", "must use HTTP on a loopback host"],
+			["http://localhost:33418/wrong", "path must be /callback"],
+			["http://localhost:33418/callback?x=1", "must not contain credentials, a query, or a fragment"],
+			["http://localhost:33418/callback#fragment", "must not contain credentials, a query, or a fragment"],
+			["http://u:p@localhost:33418/callback", "must not contain credentials, a query, or a fragment"],
+			["http://localhost/callback", "must specify a valid port"],
+		] as const)("should reject configured callback %s", async (redirectUri, expectedError) => {
 			await expect(
 				McpOAuthClientProvider.create("https://example.com/mcp", createMockSecretStorage(), undefined, {
 					clientId: "registered-client",
 					redirectUri,
 				}),
-			).rejects.toThrow(/MCP OAuth redirectUri/)
+			).rejects.toThrow(expectedError)
 		})
 	})
 
 	describe("redirectUrl (pre-server-start)", () => {
-		it("should return localhost:0 before the callback server is started (intentional lazy-init behaviour)", async () => {
+		it("should return 127.0.0.1:0 before the callback server is started", async () => {
 			const secretStorage = createMockSecretStorage()
 			const provider = await McpOAuthClientProvider.create("https://example.com/mcp", secretStorage)
 			// Port 0 is intentional: the server starts lazily in _ensureCallbackServer().
 			// DCR and authorization flows always call _ensureCallbackServer() first to obtain
 			// a real port before using redirectUrl, so port 0 is never sent to an OAuth server.
-			expect(provider.redirectUrl).toBe("http://localhost:0/callback")
+			expect(provider.redirectUrl).toBe("http://127.0.0.1:0/callback")
 		})
 	})
 
@@ -259,7 +263,7 @@ describe("McpOAuthClientProvider", () => {
 			const metadata = provider.clientMetadata
 
 			expect(metadata.client_name).toBe("Roo Code")
-			expect(metadata.redirect_uris).toEqual(["http://localhost:0/callback"])
+			expect(metadata.redirect_uris).toEqual(["http://127.0.0.1:0/callback"])
 			expect(metadata.grant_types).toEqual(["authorization_code", "refresh_token"])
 			expect(metadata.response_types).toContain("code")
 			expect(metadata.token_endpoint_auth_method).toBe("none")
@@ -1108,7 +1112,7 @@ describe("McpOAuthClientProvider", () => {
 			expect(body.get("client_id")).toBe("client-id-123")
 			expect(body.get("client_secret")).toBe("client-secret-abc")
 			expect(body.get("code_verifier")).toBe("pkce-verifier-123")
-			expect(body.get("redirect_uri")).toBe("http://localhost:0/callback")
+			expect(body.get("redirect_uri")).toBe("http://127.0.0.1:0/callback")
 
 			// Verify tokens were saved
 			const saved = await provider.tokens()

@@ -40,10 +40,16 @@ export class SecretStorageService {
 	private _key(serverUrl: string, clientId?: string): string {
 		const url = new URL(serverUrl)
 		const normalizedPath = url.pathname.replace(/\/$/, "")
-		// Use base64url encoding to avoid collisions between paths like /a-b, /a_b, /a/b.
-		const pathSuffix = normalizedPath ? `.${Buffer.from(normalizedPath).toString("base64url")}` : ""
-		const clientSuffix = clientId ? `.${Buffer.from(clientId).toString("base64url")}` : ""
-		return `${this._namespace}${url.host}${pathSuffix}${clientSuffix}.data`
+		const encodedPath = Buffer.from(normalizedPath).toString("base64url")
+
+		if (clientId) {
+			const encodedClientId = Buffer.from(clientId).toString("base64url")
+			return `${this._namespace}${url.host}.p-${encodedPath}.c-${encodedClientId}.data`
+		}
+
+		// Dynamic registrations keep the legacy key for backward compatibility.
+		const pathSuffix = normalizedPath ? `.${encodedPath}` : ""
+		return `${this._namespace}${url.host}${pathSuffix}.data`
 	}
 
 	async getOAuthData(serverUrl: string, clientId?: string): Promise<StoredMcpOAuthData | undefined> {
