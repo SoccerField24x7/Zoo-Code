@@ -277,5 +277,76 @@ describe("SecretStorageService", () => {
 			)
 			expect(await service.getOAuthData("https://example.com/mcp")).toBeUndefined()
 		})
+
+		describe("per-client isolation on one server URL", () => {
+			const url = "https://example.com/mcp"
+			const dynamicKey = "mcp.oauth.example.com.L21jcA.data"
+			// base64url("client-a") = Y2xpZW50LWE, base64url("client-b") = Y2xpZW50LWI
+			const clientAKey = "mcp.oauth.example.com.p-L21jcA.c-Y2xpZW50LWE.data"
+			const clientBKey = "mcp.oauth.example.com.p-L21jcA.c-Y2xpZW50LWI.data"
+			const tokenData = (accessToken: string): StoredMcpOAuthData => ({
+				tokens: { access_token: accessToken, token_type: "Bearer" },
+				expires_at: 1,
+			})
+
+			it("should report hasOAuthData only for the client that stored data", async () => {
+				await service.saveOAuthData(url, tokenData("client-a-token"), "client-a")
+
+				expect(await service.hasOAuthData(url, "client-a")).toBe(true)
+				expect(await service.hasOAuthData(url, "client-b")).toBe(false)
+				expect(await service.hasOAuthData(url)).toBe(false)
+
+				await service.saveOAuthData(url, tokenData("dynamic-token"))
+
+				expect(await service.hasOAuthData(url)).toBe(true)
+				expect(await service.hasOAuthData(url, "client-b")).toBe(false)
+			})
+
+			it("should delete only the entry for the given client", async () => {
+				await service.saveOAuthData(url, tokenData("client-a-token"), "client-a")
+				await service.saveOAuthData(url, tokenData("client-b-token"), "client-b")
+				await service.saveOAuthData(url, tokenData("dynamic-token"))
+
+				await service.deleteOAuthData(url, "client-a")
+
+				expect(context.secrets.delete).toHaveBeenCalledWith(clientAKey)
+				expect(await service.getOAuthData(url, "client-a")).toBeUndefined()
+				expect((await service.getOAuthData(url, "client-b"))?.tokens.access_token).toBe("client-b-token")
+				expect((await service.getOAuthData(url))?.tokens.access_token).toBe("dynamic-token")
+
+				await service.deleteOAuthData(url)
+
+				expect(context.secrets.delete).toHaveBeenLastCalledWith(dynamicKey)
+				expect(await service.getOAuthData(url)).toBeUndefined()
+				expect((await service.getOAuthData(url, "client-b"))?.tokens.access_token).toBe("client-b-token")
+			})
+
+			it("should fire onDidChange only for the subscribed client's key", () => {
+				const onClientA = vi.fn()
+				const onClientB = vi.fn()
+				const onDynamic = vi.fn()
+				service.onDidChange(url, onClientA, "client-a")
+				service.onDidChange(url, onClientB, "client-b")
+				service.onDidChange(url, onDynamic)
+
+				context.secrets._emit(clientAKey)
+
+				expect(onClientA).toHaveBeenCalledTimes(1)
+				expect(onClientB).not.toHaveBeenCalled()
+				expect(onDynamic).not.toHaveBeenCalled()
+
+				context.secrets._emit(dynamicKey)
+
+				expect(onDynamic).toHaveBeenCalledTimes(1)
+				expect(onClientA).toHaveBeenCalledTimes(1)
+				expect(onClientB).not.toHaveBeenCalled()
+
+				context.secrets._emit(clientBKey)
+
+				expect(onClientB).toHaveBeenCalledTimes(1)
+				expect(onClientA).toHaveBeenCalledTimes(1)
+				expect(onDynamic).toHaveBeenCalledTimes(1)
+			})
+		})
 	})
 })

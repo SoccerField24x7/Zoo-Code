@@ -1304,6 +1304,27 @@ describe("McpOAuthClientProvider", () => {
 	})
 
 	describe("registerClientIfNeeded", () => {
+		it("should start the callback server eagerly for a static client without a redirectUri", async () => {
+			setupCallbackServerMock()
+			const provider = await McpOAuthClientProvider.create(
+				"https://example.com/mcp",
+				createMockSecretStorage(),
+				undefined,
+				{ clientId: "registered-client" },
+			)
+
+			// Without a configured redirectUri, create() must bind the listener before the SDK
+			// reads redirect_uris, so the advertised URI carries the real port and never :0.
+			expect(startCallbackServer).toHaveBeenCalledTimes(1)
+			// Port 0 asks the OS for an ephemeral port; the mock binds it to 12345.
+			expect(startCallbackServer).toHaveBeenCalledWith(0, expect.any(String), "127.0.0.1")
+			expect(provider.redirectUrl).toBe("http://127.0.0.1:12345/callback")
+			expect(provider.redirectUrl).not.toContain(":0/")
+			expect(provider.clientMetadata.redirect_uris).toEqual(["http://127.0.0.1:12345/callback"])
+			expect((await provider.clientInformation())?.client_id).toBe("registered-client")
+			await provider.close()
+		})
+
 		it("should skip dynamic registration for a configured static client", async () => {
 			const provider = await McpOAuthClientProvider.create(
 				"https://example.com/mcp",

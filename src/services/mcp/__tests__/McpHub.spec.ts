@@ -472,6 +472,97 @@ describe("McpHub", () => {
 			)
 		})
 
+		it.each([
+			{
+				label: "a static client forces discovery despite the non-OAuth cache",
+				clientId: "registered-client",
+				hasStoredData: false,
+				knownNonOAuth: true,
+				expectedSkip: false,
+			},
+			{
+				label: "a dynamic client skips discovery for a known non-OAuth server",
+				clientId: undefined,
+				hasStoredData: false,
+				knownNonOAuth: true,
+				expectedSkip: true,
+			},
+			{
+				label: "stored OAuth data forces discovery despite the non-OAuth cache",
+				clientId: undefined,
+				hasStoredData: true,
+				knownNonOAuth: true,
+				expectedSkip: false,
+			},
+			{
+				label: "an uncached dynamic server performs discovery",
+				clientId: undefined,
+				hasStoredData: false,
+				knownNonOAuth: false,
+				expectedSkip: false,
+			},
+		])("computes skipDiscovery: $label", async ({ clientId, hasStoredData, knownNonOAuth, expectedSkip }) => {
+			const streamableModule = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
+			const StreamableHTTPClientTransport = streamableModule.StreamableHTTPClientTransport as ReturnType<
+				typeof vi.fn
+			>
+			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
+			const Client = clientModule.Client as ReturnType<typeof vi.fn>
+			const mockAuthProvider = {
+				registerClientIfNeeded: vi.fn().mockResolvedValue(undefined),
+				close: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.mocked(McpOAuthClientProvider.create).mockResolvedValue(
+				mockAuthProvider as unknown as McpOAuthClientProvider,
+			)
+			StreamableHTTPClientTransport.mockImplementation(function () {
+				return { close: vi.fn().mockResolvedValue(undefined) } as unknown as StreamableHTTPClientTransport
+			})
+			Client.mockImplementation(function () {
+				return {
+					connect: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn(),
+					request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				} as unknown as Client
+			})
+			const hasOAuthData = vi.fn().mockResolvedValue(hasStoredData)
+			const secretStorage = { hasOAuthData } as unknown as SecretStorageService
+			vi.mocked(fs.readFile).mockResolvedValue(
+				JSON.stringify({
+					mcpServers: {
+						"oauth-server": {
+							type: "streamable-http",
+							url: "https://example.com/mcp",
+							...(clientId ? { oauth: { clientId } } : {}),
+						},
+					},
+				}),
+			)
+			vi.mocked(McpOAuthClientProvider.isKnownNonOAuth).mockReturnValue(knownNonOAuth)
+
+			try {
+				const hub = new McpHub(mockProvider as ClineProvider, secretStorage)
+				await hub.waitUntilReady()
+
+				expect(hasOAuthData).toHaveBeenCalledWith("https://example.com/mcp", clientId)
+				expect(McpOAuthClientProvider.create).toHaveBeenCalledWith(
+					"https://example.com/mcp",
+					secretStorage,
+					"oauth-server",
+					expect.objectContaining({ skipDiscovery: expectedSkip }),
+				)
+				// Dynamic registration runs only for a dynamic client that performed discovery.
+				if (!clientId && !expectedSkip) {
+					expect(mockAuthProvider.registerClientIfNeeded).toHaveBeenCalled()
+				} else {
+					expect(mockAuthProvider.registerClientIfNeeded).not.toHaveBeenCalled()
+				}
+			} finally {
+				vi.mocked(McpOAuthClientProvider.isKnownNonOAuth).mockReturnValue(false)
+			}
+		})
+
 		it("closes a static OAuth provider when the hub is disposed during provider creation", async () => {
 			const streamableModule = await import("@modelcontextprotocol/sdk/client/streamableHttp.js")
 			const StreamableHTTPClientTransport = streamableModule.StreamableHTTPClientTransport as ReturnType<
