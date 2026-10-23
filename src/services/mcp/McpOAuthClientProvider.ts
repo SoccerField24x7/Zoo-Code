@@ -252,10 +252,22 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 		this._server = server
 		this._port = port
 		this._cancelCallbackServer = cancel
-		this._authCodePromise = result.then((r) => {
+		const authCodePromise = result.then((r) => {
 			if (r.error) throw new Error(`OAuth authorization failed: ${r.error}`)
 			if (!r.code) throw new Error("No authorization code received in callback")
 			return r.code
+		})
+		this._authCodePromise = authCodePromise
+
+		// Static clients can start this promise before waitForAuthCode() observes it.
+		// Observe rejection now to prevent an unhandled rejection, but keep the original
+		// promise so waitForAuthCode() still receives the callback error. A failed callback
+		// closes its listener; clear only that listener's state so a later flow can restart it.
+		void authCodePromise.catch(() => {
+			if (this._authCodePromise === authCodePromise) {
+				this._server = null
+				this._cancelCallbackServer = null
+			}
 		})
 	}
 
@@ -507,7 +519,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 	 * Rejects on error or 5-minute timeout.
 	 */
 	async waitForAuthCode(): Promise<string> {
-		if (!this._authCodePromise) {
+		if (!this._authCodePromise || !this._server) {
 			await this._ensureCallbackServer()
 		}
 		return this._authCodePromise!

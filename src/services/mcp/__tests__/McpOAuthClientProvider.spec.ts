@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest"
+import type { Server } from "http"
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js"
 
 // Mock vscode
@@ -99,6 +100,16 @@ function setupCallbackServerMock(code = "test-auth-code", state?: string) {
 		cancel: vi.fn(),
 	})
 	return { mockServer, resultPromise }
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void
+	let reject!: (reason: unknown) => void
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res
+		reject = rej
+	})
+	return { promise, resolve, reject }
 }
 
 describe("McpOAuthClientProvider", () => {
@@ -1265,6 +1276,44 @@ describe("McpOAuthClientProvider", () => {
 			await expect(provider.waitForAuthCode()).rejects.toThrow("No authorization code received")
 			await provider.close()
 		})
+
+		it("should preserve a callback error for the waiter and start a fresh listener afterward", async () => {
+			const firstResult = deferred<{ code?: string }>()
+			const secondResult = deferred<{ code?: string }>()
+			const firstServer = { close: vi.fn((cb: () => void) => cb()) }
+			const secondServer = { close: vi.fn((cb: () => void) => cb()) }
+			vi.mocked(startCallbackServer)
+				.mockResolvedValueOnce({
+					server: firstServer as unknown as Server,
+					port: 12345,
+					result: firstResult.promise,
+					cancel: vi.fn(),
+				})
+				.mockResolvedValueOnce({
+					server: secondServer as unknown as Server,
+					port: 12346,
+					result: secondResult.promise,
+					cancel: vi.fn(),
+				})
+
+			const provider = await McpOAuthClientProvider.create(
+				"https://example.com/mcp",
+				createMockSecretStorage(),
+				undefined,
+				{ clientId: "registered-client" },
+			)
+			const firstWait = provider.waitForAuthCode()
+			const firstRejection = expect(firstWait).rejects.toThrow("Callback timeout")
+			firstResult.reject(new Error("Callback timeout"))
+			await firstRejection
+
+			const secondWait = provider.waitForAuthCode()
+			await vi.waitFor(() => expect(startCallbackServer).toHaveBeenCalledTimes(2))
+			expect(provider.redirectUrl).toBe("http://127.0.0.1:12346/callback")
+			secondResult.resolve({ code: "second-code" })
+			await expect(secondWait).resolves.toBe("second-code")
+			await provider.close()
+		})
 	})
 
 	describe("close", () => {
@@ -1301,6 +1350,30 @@ describe("McpOAuthClientProvider", () => {
 
 			expect(stopCallbackServer).not.toHaveBeenCalled()
 		})
+
+		it("should handle cancellation of an eagerly started callback without an unhandled rejection", async () => {
+			const result = deferred<{ code?: string }>()
+			const cancel = vi.fn(() => result.reject(new Error("Callback cancelled")))
+			const mockServer = { close: vi.fn((cb: () => void) => cb()) }
+			vi.mocked(startCallbackServer).mockResolvedValue({
+				server: mockServer as unknown as Server,
+				port: 12345,
+				result: result.promise,
+				cancel,
+			})
+			vi.mocked(stopCallbackServer).mockImplementationOnce(async (_server, cancelCallback) => cancelCallback())
+			const provider = await McpOAuthClientProvider.create(
+				"https://example.com/mcp",
+				createMockSecretStorage(),
+				undefined,
+				{ clientId: "registered-client" },
+			)
+
+			await provider.close()
+			await Promise.resolve()
+
+			expect(cancel).toHaveBeenCalledTimes(1)
+		})
 	})
 
 	describe("registerClientIfNeeded", () => {
@@ -1321,7 +1394,9 @@ describe("McpOAuthClientProvider", () => {
 			expect(provider.redirectUrl).toBe("http://127.0.0.1:12345/callback")
 			expect(provider.redirectUrl).not.toContain(":0/")
 			expect(provider.clientMetadata.redirect_uris).toEqual(["http://127.0.0.1:12345/callback"])
-			expect((await provider.clientInformation())?.client_id).toBe("registered-client")
+			const clientInformation = (await provider.clientInformation()) as OAuthClientInformationFull
+			expect(clientInformation.client_id).toBe("registered-client")
+			expect(clientInformation.redirect_uris).toEqual(["http://127.0.0.1:12345/callback"])
 			await provider.close()
 		})
 

@@ -278,12 +278,32 @@ describe("SecretStorageService", () => {
 			expect(await service.getOAuthData("https://example.com/mcp")).toBeUndefined()
 		})
 
+		it("should isolate static OAuth credentials by URL scheme", async () => {
+			await service.saveOAuthData(
+				"http://example.com/mcp",
+				{ tokens: { access_token: "http-token", token_type: "Bearer" }, expires_at: 1 },
+				"shared-client",
+			)
+			await service.saveOAuthData(
+				"https://example.com/mcp",
+				{ tokens: { access_token: "https-token", token_type: "Bearer" }, expires_at: 2 },
+				"shared-client",
+			)
+
+			expect((await service.getOAuthData("http://example.com/mcp", "shared-client"))?.tokens.access_token).toBe(
+				"http-token",
+			)
+			expect((await service.getOAuthData("https://example.com/mcp", "shared-client"))?.tokens.access_token).toBe(
+				"https-token",
+			)
+		})
+
 		describe("per-client isolation on one server URL", () => {
 			const url = "https://example.com/mcp"
 			const dynamicKey = "mcp.oauth.example.com.L21jcA.data"
 			// base64url("client-a") = Y2xpZW50LWE, base64url("client-b") = Y2xpZW50LWI
-			const clientAKey = "mcp.oauth.example.com.p-L21jcA.c-Y2xpZW50LWE.data"
-			const clientBKey = "mcp.oauth.example.com.p-L21jcA.c-Y2xpZW50LWI.data"
+			const clientAKey = "mcp.oauth.https://example.com.p-L21jcA.c-Y2xpZW50LWE.data"
+			const clientBKey = "mcp.oauth.https://example.com.p-L21jcA.c-Y2xpZW50LWI.data"
 			const tokenData = (accessToken: string): StoredMcpOAuthData => ({
 				tokens: { access_token: accessToken, token_type: "Bearer" },
 				expires_at: 1,
