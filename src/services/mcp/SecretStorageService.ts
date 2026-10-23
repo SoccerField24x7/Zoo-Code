@@ -44,7 +44,8 @@ export class SecretStorageService {
 
 		if (clientId) {
 			const encodedClientId = Buffer.from(clientId).toString("base64url")
-			return `${this._namespace}${url.protocol}//${url.host}.p-${encodedPath}.c-${encodedClientId}.data`
+			const encodedResource = Buffer.from(`${normalizedPath}${url.search}`).toString("base64url")
+			return `${this._namespace}${url.protocol}//${url.host}.p-${encodedResource}.c-${encodedClientId}.data`
 		}
 
 		// Dynamic registrations keep the legacy key for backward compatibility.

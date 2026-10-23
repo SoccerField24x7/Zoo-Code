@@ -298,6 +298,27 @@ describe("SecretStorageService", () => {
 			)
 		})
 
+		it("should isolate static OAuth credentials by URL query", async () => {
+			await service.saveOAuthData(
+				"https://example.com/mcp?tenant=a",
+				{ tokens: { access_token: "tenant-a-token", token_type: "Bearer" }, expires_at: 1 },
+				"shared-client",
+			)
+			await service.saveOAuthData(
+				"https://example.com/mcp?tenant=b",
+				{ tokens: { access_token: "tenant-b-token", token_type: "Bearer" }, expires_at: 2 },
+				"shared-client",
+			)
+
+			expect(
+				(await service.getOAuthData("https://example.com/mcp?tenant=a", "shared-client"))?.tokens.access_token,
+			).toBe("tenant-a-token")
+			expect(
+				(await service.getOAuthData("https://example.com/mcp?tenant=b", "shared-client"))?.tokens.access_token,
+			).toBe("tenant-b-token")
+			expect(await service.getOAuthData("https://example.com/mcp", "shared-client")).toBeUndefined()
+		})
+
 		describe("per-client isolation on one server URL", () => {
 			const url = "https://example.com/mcp"
 			const dynamicKey = "mcp.oauth.example.com.L21jcA.data"

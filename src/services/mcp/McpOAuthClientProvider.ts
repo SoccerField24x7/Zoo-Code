@@ -261,12 +261,15 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 
 		// Static clients can start this promise before waitForAuthCode() observes it.
 		// Observe rejection now to prevent an unhandled rejection, but keep the original
-		// promise so waitForAuthCode() still receives the callback error. A failed callback
-		// closes its listener; clear only that listener's state so a later flow can restart it.
-		void authCodePromise.catch(() => {
-			if (this._authCodePromise === authCodePromise) {
-				this._server = null
-				this._cancelCallbackServer = null
+		// promise so waitForAuthCode() still receives the callback error. Stop only this
+		// promise's listener before clearing it so a later flow can bind a fresh listener.
+		void authCodePromise.catch(async () => {
+			if (this._authCodePromise === authCodePromise && this._server === server) {
+				await stopCallbackServer(server, cancel).catch(() => {})
+				if (this._authCodePromise === authCodePromise && this._server === server) {
+					this._server = null
+					this._cancelCallbackServer = null
+				}
 			}
 		})
 	}

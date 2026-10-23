@@ -1277,17 +1277,20 @@ describe("McpOAuthClientProvider", () => {
 			await provider.close()
 		})
 
-		it("should preserve a callback error for the waiter and start a fresh listener afterward", async () => {
+		it("should close a failed listener, preserve its error, and start a fresh listener", async () => {
 			const firstResult = deferred<{ code?: string }>()
 			const secondResult = deferred<{ code?: string }>()
+			const cleanupFinished = deferred<void>()
 			const firstServer = { close: vi.fn((cb: () => void) => cb()) }
 			const secondServer = { close: vi.fn((cb: () => void) => cb()) }
+			const firstCancel = vi.fn()
+			vi.mocked(stopCallbackServer).mockReturnValueOnce(cleanupFinished.promise)
 			vi.mocked(startCallbackServer)
 				.mockResolvedValueOnce({
 					server: firstServer as unknown as Server,
 					port: 12345,
 					result: firstResult.promise,
-					cancel: vi.fn(),
+					cancel: firstCancel,
 				})
 				.mockResolvedValueOnce({
 					server: secondServer as unknown as Server,
@@ -1303,9 +1306,14 @@ describe("McpOAuthClientProvider", () => {
 				{ clientId: "registered-client" },
 			)
 			const firstWait = provider.waitForAuthCode()
-			const firstRejection = expect(firstWait).rejects.toThrow("Callback timeout")
-			firstResult.reject(new Error("Callback timeout"))
+			const firstRejection = expect(firstWait).rejects.toThrow("Callback listener failed")
+			firstResult.reject(new Error("Callback listener failed"))
 			await firstRejection
+			await vi.waitFor(() => expect(stopCallbackServer).toHaveBeenCalledWith(firstServer, firstCancel))
+			expect(startCallbackServer).toHaveBeenCalledTimes(1)
+			cleanupFinished.resolve(undefined)
+			await cleanupFinished.promise
+			await Promise.resolve()
 
 			const secondWait = provider.waitForAuthCode()
 			await vi.waitFor(() => expect(startCallbackServer).toHaveBeenCalledTimes(2))
